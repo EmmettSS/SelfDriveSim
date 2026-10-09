@@ -1,0 +1,225 @@
+/* Source for the committed Tailwind build in static/client/css/dashboard.css. */
+@import "tailwindcss" source(none);
+@source "../templates/client/**/*.html";
+@source "../static/client/js/**/*.js";
+
+@theme {
+  --font-sans: "Vazirmatn", "Tahoma", sans-serif;
+  --color-cockpit: #0b1012;
+  --color-muted: #98a8ad;
+  --color-signal: #f5d764;
+}
+
+@layer base {
+  @font-face {
+    font-family: Vazirmatn;
+    src: url("../fonts/Vazirmatn.woff2") format("woff2");
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+  }
+
+  html { color-scheme: dark; background: #0b1012; }
+  body { @apply m-0 font-sans text-slate-100 antialiased; }
+  button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+  button:focus-visible, a:focus-visible { outline: 2px solid #f5d764; outline-offset: 5px; }
+  button:disabled { cursor: not-allowed; }
+  [hidden] { display: none !important; }
+}
+
+@layer components {
+  #camera-feed {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    background: #111a1e;
+  }
+  .camera-shade {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: linear-gradient(180deg, rgba(5, 10, 13, .86), rgba(5, 10, 13, .12) 40%, rgba(5, 10, 13, .38) 62%, rgba(5, 10, 13, .94));
+  }
+  .dashboard-shell {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    max-width: 1000px;
+    height: 100vh;
+    height: 100dvh;
+    min-height: 740px;
+    margin-inline: auto;
+    padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(16px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
+  }
+  .dashboard-header { flex-shrink: 0; }
+  .brand-mark { @apply flex h-10 w-10 items-center justify-center rounded-xl text-signal; border: 1px solid #f5d76438; background: #f5d76409; }
+  .brand-mark svg { width: 30px; height: 30px; }
+  .brand-name { font: 600 13px/1 ui-monospace, monospace; letter-spacing: .11em; }
+  .brand-name span { color: #f5d764; font-weight: 400; }
+  .phase-label { font-size: 11px; color: #98a8ad; }
+  .mode-badge { @apply inline-flex items-center gap-2 rounded-full px-3 py-2; border: 1px solid #f5d76438; background: #121916b3; color: #f5d764; font: 500 10px/1.3 ui-monospace, monospace; letter-spacing: .07em; white-space: nowrap; }
+  .mode-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+  .hud, #hud-bottom { border-radius: 12px; background: rgba(0, 0, 0, .5); }
+  .top-instruments { display: grid; grid-template-columns: 1.2fr 1fr 1fr; padding: 15px 6px; border: 1px solid #93a6b51c; backdrop-filter: blur(12px); flex-shrink: 0; }
+  .top-instruments > div { display: flex; flex-direction: column; justify-content: space-between; align-items: center; gap: 2px; padding: 0 8px; }
+  .top-instruments > div + div { border-inline-start: 1px solid #ffffff14; }
+  .instrument-label { color: #bdc8cd; font-size: 11px; }
+  .instrument-value { min-height: 30px; display: flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 600; white-space: nowrap; }
+  .instrument-value::before { content: ""; height: 6px; width: 6px; background: currentColor; border-radius: 50%; box-shadow: 0 0 10px currentColor; }
+  .instrument-caption { color: #98a8ad; font-size: 9px; }
+  .instrument-number { font: 400 29px/1.15 ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+  .instrument-unit { color: #98a8ad; font: 10px/1 ui-monospace, monospace; }
+  .red { color: #f44336; }
+  .green { color: #4caf50; }
+  .pending { color: #f5d764; }
+
+  .camera-window { position: relative; flex: 1; min-height: 180px; display: flex; flex-direction: column; }
+  .camera-window:has(#camera-prompt:not([hidden])) { min-height: 260px; }
+  .camera-meta { font-size: 10px; padding: 0 2px 10px; color: #ccd5d8; text-shadow: 0 1px 6px #000; }
+  .camera-dot { width: 5px; height: 5px; border-radius: 50%; background: #879397; }
+  .camera-dot.active { background: #4caf50; box-shadow: 0 0 12px #4caf5080; }
+  .viewfinder { position: absolute; inset: 30px 0 24px; pointer-events: none; }
+  .corner { position: absolute; width: 22px; height: 22px; border-color: #bac9ce73; }
+  .corner-tl { top: 0; left: 0; border-top-width: 1px; border-left-width: 1px; }
+  .corner-tr { top: 0; right: 0; border-top-width: 1px; border-right-width: 1px; }
+  .corner-bl { bottom: 0; left: 0; border-bottom-width: 1px; border-left-width: 1px; }
+  .corner-br { bottom: 0; right: 0; border-bottom-width: 1px; border-right-width: 1px; }
+  .crosshair { position: absolute; top: 50%; left: 50%; width: 20px; height: 20px; transform: translate(-50%, -50%); opacity: .4; }
+  .crosshair::before, .crosshair::after { content: ""; position: absolute; background: #e4edef; }
+  .crosshair::before { top: 9px; left: 0; width: 20px; height: 1px; }
+  .crosshair::after { left: 9px; top: 0; height: 20px; width: 1px; }
+  .camera-prompt { position: relative; margin: auto; padding: 12px 24px; width: min(100%, 450px); text-align: center; background: #0b1012ed; border: 1px solid #ffffff0d; border-radius: 12px; }
+  .camera-prompt-icon { width: 28px; height: 28px; margin: 0 auto 9px; color: #f5d764; }
+  .camera-message { margin-top: 6px; font-size: 11px; line-height: 1.9; color: #b3c1c6; }
+  .camera-retry { margin-top: 12px; min-height: 40px; padding: 8px 18px; border-radius: 8px; border: 1px solid #f5d76455; background: #f5d7640d; color: #f5d764; font-size: 11px; }
+  .camera-retry:disabled { opacity: .45; }
+  .alignment-hint { margin-top: auto; padding-top: 9px; font-size: 10px; color: #b8c7cc; text-align: center; text-shadow: 0 1px 5px #000; }
+
+  .cockpit { position: relative; flex-shrink: 0; padding: 16px 22px 12px; background: linear-gradient(155deg, #253036d9, #11191ded 45%, #0e1518f2); border: 1px solid #74898f3d; border-radius: 20px; box-shadow: 0 12px 60px #0005, inset 0 1px #a2b3bc0a; backdrop-filter: blur(18px); }
+  .cockpit-heading { color: #b3c4ca; padding-bottom: 12px; }
+  .run-dot { width: 6px; height: 6px; border: 1px solid #94a3aa; border-radius: 50%; }
+  .run-dot.active { border-color: #4caf50; background: #4caf50; box-shadow: 0 0 9px #4caf5070; }
+  .driving-instruments { display: grid; grid-template-columns: 46px 1fr minmax(130px, 2fr) 1fr 46px; align-items: center; gap: 8px; padding: 12px 18px; min-width: 0; }
+  .turn-slot { display: flex; flex-direction: column; align-items: center; gap: 0; }
+  .turn-indicator { font-family: Arial, sans-serif; font-size: 48px; line-height: 1; color: #a1b0b7; opacity: .22; transition: color .15s, opacity .15s; }
+  .turn-indicator.active { color: #f5d764; opacity: 1; text-shadow: 0 0 16px #f5d76455; }
+  .pedal-indicator { --pedal-color: #98a8ad; display: flex; flex-direction: column; align-items: center; justify-content: center; opacity: .55; transition: opacity .15s; }
+  .pedal-indicator.active { opacity: 1; }
+  .throttle-instrument.active { --pedal-color: #4caf50; }
+  .brake-instrument.active { --pedal-color: #f44336; }
+  .pedal-label { font-size: 12px; font-weight: 500; margin-bottom: 5px; }
+  .pedal-display { display: flex; align-items: center; justify-content: center; gap: 7px; height: 83px; direction: ltr; }
+  .pedal-icon { color: var(--pedal-color); width: 44px; height: 76px; }
+  .pedal-track { position: relative; width: 4px; height: 59px; border-radius: 3px; overflow: hidden; background: #344147; }
+  .pedal-fill { position: absolute; bottom: 0; inset-inline: 0; height: 0; background: var(--pedal-color); transition: height 50ms linear; }
+  .pedal-value { color: var(--pedal-color); font: 500 22px/1.25 ui-monospace, monospace; font-variant-numeric: tabular-nums; margin-top: 4px; }
+  .pedal-caption { font: 8px/1.5 ui-monospace, monospace; color: #9ba9ae; letter-spacing: .1em; margin-top: 4px; }
+  .steering-instrument { text-align: center; min-width: 0; }
+  .steering-ring { position: relative; margin-inline: auto; width: min(100%, 200px); }
+  .wheel-index { position: absolute; top: -5px; width: 3px; height: 4px; background: #f5d764; border-radius: 2px; left: calc(50% - 1.5px); }
+  #steering-wheel { width: 100%; filter: drop-shadow(0 6px 7px #0008); transform: rotate(var(--steering-angle, 0deg)); transition: transform 50ms linear; }
+  .steering-readout { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 3px; }
+  #steering-value { font: 500 15px/1.25 ui-monospace, monospace; color: #dbe4e8; font-variant-numeric: tabular-nums; }
+  .session-strip { border-top: 1px solid #ffffff0c; margin-top: 10px; padding: 10px 0; font-size: 9px; }
+  .control-button { display: flex; align-items: center; justify-content: center; gap: 9px; min-height: 49px; padding: 8px 10px; border-radius: 10px; font-size: 13px; font-weight: 650; transition: filter .15s, opacity .15s; }
+  .control-button:hover:enabled { filter: brightness(1.13); }
+  .control-button:active:enabled { filter: brightness(.9); }
+  .control-button:disabled { opacity: .3; }
+  .start-button { background: #4caf50; color: #071f09; border: 1px solid #4caf50; }
+  .start-button > span { font-size: 24px; line-height: 1; }
+  .stop-button { background: #f44336; color: #250804; border: 1px solid #f44336; }
+  .stop-square { width: 8px; height: 8px; border-radius: 1px; background: currentColor; }
+  .status-message { min-height: 18px; margin-top: 10px; font-size: 10px; line-height: 1.8; color: #a2b1b8; text-align: center; }
+  .dashboard-footer { flex-shrink: 0; }
+  .simulator-link { white-space: nowrap; padding: 4px 0; color: #c3cdd1; border-bottom: 1px solid #82939d40; }
+  .simulator-link:hover { color: #f5d764; }
+  .noscript-warning { position: fixed; inset: auto 16px 16px; background: #481616; padding: 20px; text-align: center; border-radius: 12px; }
+
+  @media (min-width: 768px) and (min-height: 651px) {
+    .dashboard-shell { padding-top: 32px; padding-bottom: 22px; gap: 18px; }
+    .top-instruments { padding: 16px 20px; }
+    .instrument-label { font-size: 12px; }
+    .instrument-caption { font-size: 10px; }
+    .instrument-number { font-size: 32px; }
+    .camera-window:has(#camera-prompt:not([hidden])) { min-height: 240px; }
+    .cockpit { padding: 14px 28px 10px; }
+    .cockpit-heading { padding-bottom: 8px; }
+    .steering-ring { max-width: 160px; }
+    .driving-instruments { padding: 8px max(18px, calc((100% - 640px) / 2)); }
+    .session-strip { margin-top: 8px; padding-block: 8px; }
+    .status-message { margin-top: 8px; }
+    .action-buttons { max-width: 520px; margin-inline: auto; }
+    .brand-name { font-size: 15px; }
+  }
+  @media (max-width: 600px) {
+    .dashboard-shell { gap: 12px; padding: max(18px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left)); }
+    .cockpit { padding: 13px 12px 10px; border-radius: 16px; }
+    .driving-instruments { grid-template-columns: 28px minmax(40px, 1fr) minmax(120px, 2.4fr) minmax(40px, 1fr) 28px; gap: 3px; padding: 12px 4px; }
+    .turn-indicator { font-size: 48px; transform: scaleX(.75); }
+    .pedal-display { gap: 4px; height: 73px; }
+    .pedal-icon { width: 33px; height: 65px; }
+    .pedal-value { font-size: 19px; }
+    .steering-ring { max-width: 175px; }
+    .top-instruments { padding: 12px 2px; }
+    .instrument-value { font-size: 12px; }
+    .instrument-caption { font-size: 8px; }
+    .instrument-label { font-size: 10px; }
+    .dashboard-footer { font-size: 8px; }
+    .camera-window { min-height: 205px; }
+  }
+  @media (max-width: 380px) {
+    .brand-name { font-size: 11px; }
+    .brand-mark { width: 32px; height: 32px; }
+    .mode-badge { padding: 7px 8px; font-size: 8px; }
+    .top-instruments > div { padding-inline: 5px; }
+    .instrument-caption { font-size: 7px; }
+    .driving-instruments { grid-template-columns: 24px minmax(32px, 1fr) minmax(110px, 2.7fr) minmax(32px, 1fr) 24px; gap: 2px; }
+    .pedal-display { gap: 2px; }
+    .pedal-icon { width: 29px; }
+    .session-strip { font-size: 8px; }
+  }
+  @media (orientation: landscape) and (max-height: 650px) {
+    .dashboard-shell { display: grid; grid-template-columns: minmax(330px, 1.1fr) minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 10px 18px; min-height: 380px; max-width: 1120px; padding: max(10px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left)); }
+    .dashboard-header { grid-column: 1 / -1; }
+    .brand-mark { width: 30px; height: 30px; }
+    .brand-name { font-size: 11px; }
+    .dashboard-header h1 { font-size: 10px; }
+    .top-instruments { grid-column: 2; grid-row: 2; padding: 8px 0; }
+    .instrument-label { font-size: 9px; }
+    .instrument-number { font-size: 22px; }
+    .instrument-caption { font-size: 7px; }
+    .instrument-value { font-size: 11px; min-height: 25px; }
+    .camera-window { grid-column: 2; grid-row: 3; min-height: 155px; }
+    .camera-window:has(#camera-prompt:not([hidden])) { min-height: 190px; }
+    .camera-meta { font-size: 9px; }
+    .camera-prompt { padding: 6px 12px; }
+    .camera-prompt-icon { display: none; }
+    .camera-prompt h2 { font-size: 12px; }
+    .camera-message { font-size: 9px; margin-top: 3px; }
+    .camera-retry { margin-top: 6px; min-height: 30px; padding: 4px 12px; font-size: 10px; }
+    .alignment-hint { font-size: 8px; }
+    .cockpit { grid-column: 1; grid-row: 2 / 4; padding: 10px 12px 8px; display: flex; flex-direction: column; justify-content: space-between; border-radius: 14px; }
+    .cockpit-heading { padding-bottom: 6px; }
+    .driving-instruments { grid-template-columns: 28px 1fr minmax(110px, 1.9fr) 1fr 28px; gap: 4px; padding: 6px 4px; }
+    .steering-ring { max-width: 136px; }
+    .steering-readout { margin-top: 0; }
+    .pedal-display { height: 55px; gap: 3px; }
+    .pedal-icon { height: 52px; width: 30px; }
+    .pedal-track { height: 39px; }
+    .pedal-value { font-size: 16px; }
+    .pedal-label { font-size: 10px; margin-bottom: 2px; }
+    .pedal-caption { font-size: 7px; margin-top: 1px; }
+    .turn-indicator { transform: scale(.8); }
+    .session-strip { padding: 5px 0; margin-top: 5px; font-size: 8px; }
+    .control-button { min-height: 39px; font-size: 11px; }
+    .status-message { margin-top: 5px; min-height: 16px; font-size: 9px; }
+    .dashboard-footer { grid-column: 1 / -1; font-size: 8px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { transition: none !important; }
+  }
+}

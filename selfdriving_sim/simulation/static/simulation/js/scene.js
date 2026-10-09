@@ -188,6 +188,12 @@ export function speedToKmh(speed) {
   return speed * 3.6;
 }
 
+/** Speed frame sent from the scene to the phone. Commands are never included. */
+export function telemetryFrame(speedMs) {
+  const speedKmh = clamp(Math.round(speedToKmh(speedMs)), 0, 400);
+  return { type: "telemetry", speed_kmh: speedKmh };
+}
+
 /**
  * Offset applied to the lane markings so that they appear to scroll with the
  * car. The offset stays inside one dash period, which keeps the pattern
@@ -724,6 +730,7 @@ function createKeyboardControls() {
  */
 function connectRenderSocket(hud) {
   let attempt = 0;
+  let socket = null;
 
   function renderSocketUrl() {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -732,7 +739,7 @@ function connectRenderSocket(hud) {
 
   function connect() {
     hud.setStatus("در حال اتصال…", "pending");
-    const socket = new WebSocket(renderSocketUrl());
+    socket = new WebSocket(renderSocketUrl());
 
     socket.onopen = () => {
       attempt = 0;
@@ -771,6 +778,17 @@ function connectRenderSocket(hud) {
   }
 
   connect();
+  return {
+    sendTelemetry(speedMs) {
+      if (socket?.readyState !== WebSocket.OPEN || socket.bufferedAmount > 1024) return false;
+      try {
+        socket.send(JSON.stringify(telemetryFrame(speedMs)));
+        return true;
+      } catch {
+        return false;
+      }
+    },
+  };
 }
 
 function boot() {
@@ -797,6 +815,7 @@ function boot() {
   const clock = new THREE.Clock();
   let frameRate = 60;
   let hudTimer = 0;
+  const renderLink = connectRenderSocket(hud);
 
   function loop() {
     const dt = Math.min(clock.getDelta(), 0.1); // ignore tab switch pauses
@@ -807,12 +826,12 @@ function boot() {
     if (hudTimer >= 0.25) {
       hud.setSpeed(simulation.state.speed);
       hud.setFrameRate(frameRate);
+      renderLink.sendTelemetry(simulation.state.speed);
       hudTimer = 0;
     }
     requestAnimationFrame(loop);
   }
 
-  connectRenderSocket(hud);
   loop();
 }
 

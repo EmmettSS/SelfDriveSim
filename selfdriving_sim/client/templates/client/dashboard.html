@@ -1,0 +1,167 @@
+{% load static %}<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1012">
+  <meta name="description" content="داشبورد موبایل شبیه‌ساز خودران؛ دوربین عقب و آزمایش ارسال فرمان با مدل Mock.">
+  <title>کابین کنترل | SelfDriveSim</title>
+  <link rel="icon" href="data:,">
+  <link rel="preload" href="{% static 'client/fonts/Vazirmatn.woff2' %}" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="{% static 'client/css/dashboard.css' %}">
+</head>
+<body>
+  <video id="camera-feed" autoplay muted playsinline aria-label="تصویر زنده دوربین عقب"></video>
+  <canvas id="process-canvas" width="200" height="66" hidden aria-hidden="true"></canvas>
+  <div class="camera-shade" aria-hidden="true"></div>
+
+  <main id="dashboard" class="dashboard-shell">
+    <header class="dashboard-header flex items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" fill="none"><path d="m9 21 3-12h8l3 12M10 17h12M13 22h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M16 3v2M16 27v2" stroke="currentColor" stroke-width="2"/></svg>
+        </span>
+        <div>
+          <div class="brand-name" dir="ltr">SELFDRIVE<span>SIM</span></div>
+          <h1 class="mt-1 text-sm font-medium text-muted">کابین کنترل موبایل</h1>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="phase-label hidden sm:inline">فاز ۰۳</span>
+        <span class="mode-badge" dir="ltr"><span class="mode-dot" aria-hidden="true"></span>MOCK MODE</span>
+      </div>
+    </header>
+
+    <div id="hud-top" class="hud top-instruments" aria-label="وضعیت ارتباط و تله‌متری">
+      <div class="connection-instrument">
+        <span class="instrument-label">ارتباط با شبیه‌ساز</span>
+        <span id="ws-status" class="instrument-value pending" role="status">منتظر دوربین</span>
+        <span class="instrument-caption" dir="ltr">/ws/control/</span>
+        <button id="btn-reconnect" class="text-[10px] text-signal underline underline-offset-4" type="button" hidden>اتصال مجدد ↻</button>
+      </div>
+      <div class="speed-instrument">
+        <span class="instrument-label">سرعت خودرو</span>
+        <div class="flex items-baseline justify-center gap-2" dir="ltr">
+          <span id="speed-value" class="instrument-number" aria-label="سرعت هنوز دریافت نمی‌شود">—</span>
+          <span class="instrument-unit">km/h</span>
+        </div>
+        <span class="instrument-caption">خودروی شبیه‌ساز</span>
+      </div>
+      <div class="rate-instrument">
+        <span class="instrument-label">نرخ ارسال</span>
+        <div class="flex items-baseline justify-center gap-2" dir="ltr">
+          <span id="fps-value" class="instrument-number">0</span>
+          <span class="instrument-unit">FPS</span>
+        </div>
+        <span class="instrument-caption">هدف: ۲۰ فرمان / ثانیه</span>
+      </div>
+    </div>
+
+    <section class="camera-window" aria-label="قاب تنظیم دوربین">
+      <div class="camera-meta flex items-center justify-between gap-2">
+        <span class="flex items-center gap-2"><span id="camera-dot" class="camera-dot" aria-hidden="true"></span><span id="camera-status">دوربین عقب</span></span>
+        <span id="camera-resolution" class="font-mono text-[10px] tracking-wider" dir="ltr">CAM 01</span>
+      </div>
+      <div class="viewfinder" aria-hidden="true">
+        <i class="corner corner-tl"></i><i class="corner corner-tr"></i>
+        <i class="corner corner-bl"></i><i class="corner corner-br"></i>
+        <span class="crosshair"></span>
+      </div>
+      <div id="camera-prompt" class="camera-prompt">
+        <svg class="camera-prompt-icon" viewBox="0 0 48 48" fill="none" aria-hidden="true"><path d="m16 12 3-5h10l3 5h7a4 4 0 0 1 4 4v21a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V16a4 4 0 0 1 4-4h7Z" stroke="currentColor" stroke-width="1.5"/><circle cx="24" cy="26" r="9" stroke="currentColor" stroke-width="1.5"/><path d="M36 18h1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <h2 id="camera-title" class="text-base font-semibold">چشم‌های شبیه‌ساز</h2>
+        <p id="camera-message" class="camera-message">برای دیدن مانیتور، دسترسی به دوربین عقب را تأیید کنید.</p>
+        <button id="btn-camera" class="camera-retry" type="button" disabled>در انتظار دسترسی…</button>
+      </div>
+      <p class="alignment-hint">گوشی را ثابت و روبه‌روی مانیتور قرار دهید</p>
+    </section>
+
+    <section class="cockpit" aria-label="پنل فرمان و پدال‌ها">
+      <div class="cockpit-heading flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2">
+          <span id="run-dot" class="run-dot" aria-hidden="true"></span>
+          <h2 id="run-status" class="text-xs font-medium">آماده‌سازی</h2>
+        </div>
+        <span class="text-[10px] tracking-[0.18em] text-muted" dir="ltr">CONTROL PANEL</span>
+      </div>
+
+      <!-- Physical left/right positions stay fixed even though the page is RTL. -->
+      <div id="hud-bottom" class="driving-instruments" dir="ltr">
+        <div class="turn-slot left-signal">
+          <span id="indicator-left" class="turn-indicator" role="img" aria-label="راهنمای چپ خاموش">◀</span>
+          <span class="text-[10px] text-muted" dir="rtl">چپ</span>
+        </div>
+
+        <div id="indicator-brake" class="pedal-indicator brake-instrument" dir="rtl">
+          <span class="pedal-label">ترمز</span>
+          <div class="pedal-display">
+            <div class="pedal-track" role="meter" aria-label="مقدار فرمان ترمز" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="brake-meter"><span id="brake-fill" class="pedal-fill"></span></div>
+            <svg class="pedal-icon brake-pedal" viewBox="0 0 52 84" fill="none" aria-hidden="true"><path d="M18 67v13h16V67" stroke="currentColor" stroke-width="2"/><rect x="4" y="12" width="44" height="54" rx="8" fill="currentColor" fill-opacity=".08" stroke="currentColor" stroke-width="2"/><path d="M14 25h24M14 34h24M14 43h24M14 52h24" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+          </div>
+          <output id="brake-value" class="pedal-value" dir="ltr" aria-live="off">0%</output>
+          <span class="pedal-caption">BRAKE</span>
+        </div>
+
+        <div class="steering-instrument" dir="rtl">
+          <div class="steering-ring">
+            <span class="wheel-index" aria-hidden="true"></span>
+            <svg id="steering-wheel" viewBox="0 0 220 220" role="img" aria-label="فرمان در حالت مستقیم">
+              <defs>
+                <linearGradient id="wheel-rim" x1="0" y1="0" x2="0.7" y2="1"><stop stop-color="#536269"/><stop offset=".45" stop-color="#263138"/><stop offset="1" stop-color="#12191d"/></linearGradient>
+                <linearGradient id="wheel-spoke" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#59676d"/><stop offset="1" stop-color="#212b30"/></linearGradient>
+                <radialGradient id="wheel-hub"><stop stop-color="#354149"/><stop offset="1" stop-color="#1a2328"/></radialGradient>
+              </defs>
+              <circle cx="110" cy="110" r="99" fill="#05090b" fill-opacity=".48" stroke="#697980" stroke-opacity=".25"/>
+              <circle cx="110" cy="110" r="89" fill="none" stroke="#070c0f" stroke-width="23"/>
+              <circle cx="110" cy="110" r="89" fill="none" stroke="url(#wheel-rim)" stroke-width="17"/>
+              <circle cx="110" cy="110" r="80" fill="none" stroke="#748087" stroke-opacity=".25"/>
+              <path d="m29 95 56 9 13 25-66-13ZM191 95l-56 9-13 25 66-13ZM94 131h32l-8 64h-16Z" fill="url(#wheel-spoke)" stroke="#6e7d83" stroke-opacity=".3"/>
+              <rect x="106" y="14" width="8" height="16" rx="3" fill="#f5d764"/>
+              <path d="M76 110c0-21 15-32 34-32s34 11 34 32v5c0 20-15 37-34 37s-34-17-34-37Z" fill="url(#wheel-hub)" stroke="#5c6b72" stroke-opacity=".5"/>
+              <path d="m102 117 4-17h8l4 17m-14-5h12" fill="none" stroke="#ced7d9" stroke-width="2.5" stroke-linecap="round"/>
+              <path d="M49 99h15M156 99h15" stroke="#8c9a9f" stroke-width="2" stroke-linecap="round"/>
+              <path d="M90 54c13-5 27-5 40 0" fill="none" stroke="#69777e" stroke-width="1" stroke-dasharray="2 4"/>
+            </svg>
+          </div>
+          <div class="steering-readout"><span class="text-[10px] text-muted">فرمان</span><output id="steering-value" dir="ltr" aria-live="off">+0.00</output></div>
+        </div>
+
+        <div id="indicator-throttle" class="pedal-indicator throttle-instrument" dir="rtl">
+          <span class="pedal-label">گاز</span>
+          <div class="pedal-display">
+            <div class="pedal-track" role="meter" aria-label="مقدار فرمان گاز" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="throttle-meter"><span id="throttle-fill" class="pedal-fill"></span></div>
+            <svg class="pedal-icon" viewBox="0 0 52 84" fill="none" aria-hidden="true"><path d="M20 67v13h12V67" stroke="currentColor" stroke-width="2"/><rect x="11" y="4" width="30" height="63" rx="8" fill="currentColor" fill-opacity=".08" stroke="currentColor" stroke-width="2"/><path d="M20 16h12M20 27h12M20 38h12M20 49h12M20 59h12" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></svg>
+          </div>
+          <output id="throttle-value" class="pedal-value" dir="ltr" aria-live="off">0%</output>
+          <span class="pedal-caption">THROTTLE</span>
+        </div>
+
+        <div class="turn-slot right-signal">
+          <span id="indicator-right" class="turn-indicator" role="img" aria-label="راهنمای راست خاموش">▶</span>
+          <span class="text-[10px] text-muted" dir="rtl">راست</span>
+        </div>
+      </div>
+
+      <div class="session-strip flex items-center justify-between gap-3">
+        <span class="flex items-center gap-1.5"><span class="text-muted">فرمان ارسالی</span><span id="packet-count" class="font-mono" dir="ltr">0</span></span>
+        <span class="font-mono text-muted" dir="ltr">INPUT 200 × 66</span>
+        <span class="text-muted">مدل آزمایشی</span>
+      </div>
+
+      <div class="action-buttons grid grid-cols-[1.4fr_1fr] gap-3">
+        <button id="btn-start" class="control-button start-button" type="button" disabled><span aria-hidden="true">▷</span> شروع خودران</button>
+        <button id="btn-stop" class="control-button stop-button" type="button" disabled><span class="stop-square" aria-hidden="true"></span> توقف</button>
+      </div>
+      <p id="status-message" class="status-message" role="status" aria-live="polite">دوربین و اتصال باید آماده باشند؛ ارسال فقط با دکمهٔ شروع انجام می‌شود.</p>
+    </section>
+
+    <footer class="dashboard-footer flex items-center justify-between gap-3 text-[10px] text-muted">
+      <span class="privacy-note">تصویر روی گوشی می‌ماند؛ فقط فرمان ارسال می‌شود.</span>
+      <a href="{% url 'simulation:index' %}" target="_blank" rel="noopener" class="simulator-link">نمایشگر شبیه‌ساز <span aria-hidden="true">↗</span></a>
+    </footer>
+    <noscript><p class="noscript-warning">برای استفاده از دوربین و ارسال فرمان، JavaScript مرورگر را فعال کنید.</p></noscript>
+  </main>
+
+  <script type="module" src="{% static 'client/js/inference.js' %}"></script>
+</body>
+</html>

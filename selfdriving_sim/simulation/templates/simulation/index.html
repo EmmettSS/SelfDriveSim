@@ -4,10 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>شبیه‌ساز خودران</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="preload" href="{% static 'client/fonts/Vazirmatn.woff2' %}" as="font" type="font/woff2" crossorigin>
   <style>
+    @font-face {
+      font-family: 'Vazirmatn';
+      src: url("{% static 'client/fonts/Vazirmatn.woff2' %}") format('woff2');
+      font-style: normal;
+      font-weight: 100 900;
+      font-display: swap;
+    }
     /* The canvas fills the viewport; every overlay sits on top of it. */
     html, body {
       margin: 0;
@@ -67,6 +72,13 @@
       font-size: 12px;
     }
 
+    .dashboard-link {
+      display: inline-block;
+      margin-inline-start: 16px;
+      color: #e6edf3;
+      text-underline-offset: 4px;
+    }
+
     /* Connection state colours, toggled from scene.js. */
     #ws-status.is-connected { color: #3fb950; }
     #ws-status.is-disconnected { color: #f85149; }
@@ -114,6 +126,7 @@
 
   <div id="hud-legend">
     <kbd>↑</kbd>/<kbd>W</kbd> گاز &nbsp;·&nbsp; <kbd>↓</kbd>/<kbd>S</kbd> ترمز &nbsp;·&nbsp; <kbd>←</kbd>/<kbd>→</kbd>/<kbd>A</kbd>/<kbd>D</kbd> فرمان
+    <a class="dashboard-link" href="{% url 'client:dashboard' %}" target="_blank" rel="noopener">داشبورد موبایل ↗</a>
   </div>
 
   <script type="module" src="{% static 'simulation/js/scene.js' %}"></script>

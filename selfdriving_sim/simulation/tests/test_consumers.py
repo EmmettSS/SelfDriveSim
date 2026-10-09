@@ -87,3 +87,31 @@ async def test_malformed_frames_get_an_error_and_are_not_broadcast():
 
     await control.disconnect()
     await render.disconnect()
+
+
+async def test_renderer_speed_reaches_the_phone_and_is_not_echoed():
+    render = make_communicator("/ws/render/")
+    control = make_communicator("/ws/control/")
+    assert (await render.connect())[0]
+    assert (await control.connect())[0]
+
+    await render.send_json_to({"type": "telemetry", "speed_kmh": 47.6})
+    assert await control.receive_json_from(timeout=RECEIVE_TIMEOUT) == {
+        "type": "telemetry",
+        "speed_kmh": 47.6,
+    }
+    assert await render.receive_nothing(timeout=0.1)
+
+    await render.send_json_to({"type": "telemetry", "speed_kmh": -12})
+    assert await control.receive_json_from(timeout=RECEIVE_TIMEOUT) == {
+        "type": "telemetry",
+        "speed_kmh": 0.0,
+    }
+
+    await render.send_json_to({"speed_kmh": 10})
+    reply = await render.receive_json_from(timeout=RECEIVE_TIMEOUT)
+    assert reply["type"] == "error"
+    assert await control.receive_nothing(timeout=0.1)
+
+    await control.disconnect()
+    await render.disconnect()

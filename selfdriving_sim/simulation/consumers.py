@@ -6,8 +6,13 @@ Message flow::
           --group_send(simulation_render, control.update)-->
     browser (Three.js) <--/ws/render/-- RenderConsumer
 
+    browser --/ws/render/--> RenderConsumer
+          --group_send(simulation_render, telemetry.update)-->
+    phone <--/ws/control/-- ControlConsumer
+
 Control frames are validated and clipped on the server before they are
-broadcast, so the renderer can rely on the values it receives.
+broadcast, so the renderer can rely on the values it receives. Telemetry
+is a speed readout only; it does not apply driving commands.
 """
 
 import json
@@ -28,6 +33,9 @@ PEDAL_RANGE = (0.0, 1.0)  # throttle and brake
 TURN_SIGNAL_RANGE = (0, 2)  # 0 = off, 1 = left, 2 = right
 
 COMMAND_FIELDS = ("steering", "throttle", "brake", "turn_signal")
+
+# Inclusive km/h range reported by the Three.js scene to the phone HUD.
+SPEED_KMH_RANGE = (0.0, 400.0)
 
 
 class CommandValidationError(ValueError):
@@ -83,6 +91,16 @@ def sanitize_command(payload: Any) -> dict[str, float | int]:
     }
 
 
+def sanitize_telemetry(payload: Any) -> dict[str, float]:
+    """Validate a renderer telemetry frame and clip speed into a finite range."""
+    if not isinstance(payload, dict):
+        raise CommandValidationError("payload must be a JSON object")
+    if payload.get("type") != "telemetry":
+        raise CommandValidationError("telemetry frames must set type to 'telemetry'")
+    speed = _clip(_read_number(payload, "speed_kmh"), SPEED_KMH_RANGE)
+    return {"speed_kmh": speed}
+
+
 class ControlConsumer(AsyncJsonWebsocketConsumer):
     """Receives driving commands from the phone and broadcasts them to renderers."""
 
@@ -114,6 +132,14 @@ class ControlConsumer(AsyncJsonWebsocketConsumer):
             await self._reject(str(exc))
             return
 
+        # Log the validated controls only, never image data or an untrusted payload.
+        logger.info(
+            "Control /ws/control/ steering=%.3f throttle=%.3f brake=%.3f turn_signal=%d",
+            command["steering"],
+            command["throttle"],
+            command["brake"],
+            command["turn_signal"],
+        )
         await self.channel_layer.group_send(
             RENDER_GROUP,
             {"type": "control.update", "command": command},
@@ -126,6 +152,10 @@ class ControlConsumer(AsyncJsonWebsocketConsumer):
         control clients, including its own. Forwarding them would echo the
         phone's commands back to it, so they are ignored here.
         """
+
+    async def telemetry_update(self, event):
+        """Forward the scene speed to the phone. Commands are never included."""
+        await self.send_json({"type": "telemetry", "speed_kmh": event["speed_kmh"]})
 
     async def _reject(self, message):
         """Tell the sender why a frame was refused. Nothing is broadcast."""
@@ -150,3 +180,32 @@ class RenderConsumer(AsyncJsonWebsocketConsumer):
         commands apart from other messages it may receive later.
         """
         await self.send_json({"type": "control_update", **event["command"]})
+
+    async def receive(self, text_data=None, bytes_data=None, **kwargs):
+        if text_data is None:
+            await self._reject("expected a JSON text frame")
+            return
+        try:
+            content = json.loads(text_data)
+        except json.JSONDecodeError:
+            await self._reject("frame is not valid JSON")
+            return
+        await self.receive_json(content)
+
+    async def receive_json(self, content, **kwargs):
+        try:
+            telemetry = sanitize_telemetry(content)
+        except CommandValidationError as exc:
+            await self._reject(str(exc))
+            return
+        await self.channel_layer.group_send(
+            RENDER_GROUP,
+            {"type": "telemetry.update", "speed_kmh": telemetry["speed_kmh"]},
+        )
+
+    async def telemetry_update(self, event):
+        """Drop telemetry echoes so the scene does not receive its own speed."""
+
+    async def _reject(self, message):
+        logger.debug("Rejected render frame: %s", message)
+        await self.send_json({"type": "error", "message": message})

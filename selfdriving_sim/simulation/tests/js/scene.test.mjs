@@ -42,6 +42,7 @@ import {
   pickTrafficSpeed,
   smoothFrameRate,
   speedToKmh,
+  telemetryFrame,
   stepLateralPosition,
   stepSpeed,
 } from "../../static/simulation/js/scene.js";
@@ -214,6 +215,11 @@ test("lane markings scroll inside one dash period", () => {
     const offset = dashScrollOffset(distance);
     assert.ok(offset >= 0 && offset < 6, `offset ${offset}`);
   }
+});
+
+test("telemetry frames carry only a clipped integer km/h reading", () => {
+  assert.deepEqual(telemetryFrame(10), { type: "telemetry", speed_kmh: 36 });
+  assert.equal(telemetryFrame(-4).speed_kmh, 0);
 });
 
 test("the frame rate estimate converges on the measured interval", () => {
