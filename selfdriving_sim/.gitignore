@@ -1,0 +1,20 @@
+# Python bytecode and tool caches
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Virtual environments
+venv/
+.venv/
+
+# Local secrets and the development database
+.env
+db.sqlite3
+
+# collectstatic output
+staticfiles/
+
+# Model artefacts (large binaries, see models/README.md)
+*.h5
+models/data/
+client/static/client/models/dave2/
