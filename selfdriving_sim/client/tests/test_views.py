@@ -38,7 +38,7 @@ def test_dashboard_has_all_controls_and_truthful_telemetry_labels(client):
     ):
         assert f'id="{element_id}"' in html
     assert "MOCK MODE" in html
-    assert "تله‌متری در فاز ۵" in html
+    assert "خودروی شبیه‌ساز" in html
     assert "شروع خودران" in html
     assert "توقف" in html
 

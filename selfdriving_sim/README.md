@@ -166,7 +166,7 @@ Open `/dashboard/` on the phone over **HTTPS**. For the selected Android/ngrok s
 
 The dashboard uses a rear-camera preference, a hidden 200×66 processing canvas, a visible steering wheel, left/right turn arrows, throttle/brake indicators and start/stop controls. After camera permission succeeds it opens `/ws/control/`, using WSS when the page is HTTPS. No frames are sent until Start is pressed. The 50 ms loop generates bounded sine-wave Mock controls and sends only the four control fields; images remain on the phone.
 
-FPS measures successful browser sends, not delivery acknowledgements. Speed remains `—` because there is no renderer-to-phone telemetry yet. Stop sends one best-effort zero-throttle/full-brake request. Network loss, a camera failure or a hidden page stops inference; reconnecting never restarts it automatically. Do not treat this as a guaranteed emergency stop. The current renderer still only logs incoming commands.
+FPS measures successful browser sends, not delivery acknowledgements. Speed is the scene car's km/h, forwarded from `/ws/render/` to `/ws/control/` as `{type: "telemetry", speed_kmh}`. Mock commands still do not move the car; that remains phase 5. Stop sends one best-effort zero-throttle/full-brake request. Network loss, a camera failure or a hidden page stops inference; reconnecting never restarts it automatically. Do not treat this as a guaranteed emergency stop. The current renderer still only logs incoming commands.
 
 Tailwind CSS and Vazirmatn are served locally with no CDN or runtime npm dependency. The compiled stylesheet is committed for direct Django use. To change it:
 

@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   CONNECT_TIMEOUT_MS,
   DashboardController,
+  applyTelemetry,
   FRAME_HEIGHT,
   FRAME_WIDTH,
   MAX_BUFFERED_BYTES,
@@ -179,6 +180,14 @@ test("camera errors provide permission, busy-camera and missing-camera guidance"
   assert.match(cameraErrorMessage({ name: "NotReadableError" }), /برنامه/);
   assert.match(cameraErrorMessage({ name: "NotFoundError" }), /پیدا نشد/);
   assert.match(cameraErrorMessage(null), /HTTPS/);
+});
+
+test("telemetry keeps only a finite non-negative km/h reading", () => {
+  assert.equal(applyTelemetry({ type: "telemetry", speed_kmh: 47.6 }), 48);
+  assert.equal(applyTelemetry({ type: "telemetry", speed_kmh: 0 }), 0);
+  assert.equal(applyTelemetry({ type: "control_update", speed_kmh: 10 }), null);
+  assert.equal(applyTelemetry({ type: "telemetry", speed_kmh: NaN }), null);
+  assert.equal(applyTelemetry({ type: "telemetry" }), null);
 });
 
 test("FPS counts successful sends over elapsed time, not timer frequency", () => {
@@ -420,6 +429,14 @@ test("send exceptions stop inference and close the failed socket", async () => {
   assert.equal(h.controller.running, false);
   assert.equal(h.sockets[0].readyState, 3);
   assert.equal(h.sockets[0].sent.length, 0);
+});
+
+test("renderer telemetry updates the HUD and is cleared on disconnect", async () => {
+  const h = await connected();
+  h.sockets[0].message(JSON.stringify({ type: "telemetry", speed_kmh: 42.2 }));
+  assert.equal(h.ui["speed-value"].textContent, "42");
+  h.sockets[0].close(1006);
+  assert.equal(h.ui["speed-value"].textContent, "—");
 });
 
 test("server rejection stops the loop; invalid JSON is ignored", async () => {

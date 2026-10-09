@@ -82,6 +82,19 @@ test("20 Hz Mock controls traverse Django and Redis to the render socket, then s
   await page.evaluate(() => window.renderSocket.close());
 });
 
+test("scene speed telemetry appears on the dashboard without applying mock motion", async ({ page }) => {
+  await ready(page);
+  await page.evaluate(() => new Promise((resolve, reject) => {
+    const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+    window.renderSocket = new WebSocket(`${scheme}//${location.host}/ws/render/`);
+    window.renderSocket.onopen = resolve;
+    window.renderSocket.onerror = reject;
+  }));
+  await page.evaluate(() => window.renderSocket.send(JSON.stringify({ type: "telemetry", speed_kmh: 73 })));
+  await expect(page.locator("#speed-value")).toHaveText("73");
+  await page.evaluate(() => window.renderSocket.close());
+});
+
 test("permission denial has recovery guidance and no control connection", async ({ page }) => {
   const sockets = [];
   page.on("websocket", (socket) => sockets.push(socket.url()));

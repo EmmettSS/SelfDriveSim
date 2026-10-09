@@ -38,6 +38,13 @@ export function nextReconnectDelayMs(attempt) {
   return Math.min(500 * 2 ** (attempt - 1), 15000);
 }
 
+export function applyTelemetry(payload) {
+  if (payload === null || typeof payload !== "object" || payload.type !== "telemetry") return null;
+  const value = payload.speed_kmh;
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.max(0, Math.round(value));
+}
+
 export function cameraErrorMessage(error) {
   const messages = {
     NotAllowedError: "اجازهٔ دوربین داده نشد. در تنظیمات سایت در Chrome، دوربین را مجاز کنید و دوباره تلاش کنید. صفحه را مستقیماً در مرورگر باز کنید، نه داخل برنامه‌ای دیگر.",
@@ -78,7 +85,7 @@ export class SendRateCounter {
 const ELEMENT_IDS = [
   "camera-feed", "process-canvas", "camera-prompt", "camera-title", "camera-message",
   "camera-status", "camera-resolution", "camera-dot", "btn-camera", "btn-reconnect",
-  "ws-status", "fps-value", "btn-start", "btn-stop", "run-dot", "run-status",
+  "ws-status", "speed-value", "fps-value", "btn-start", "btn-stop", "run-dot", "run-status",
   "status-message", "indicator-left", "indicator-right", "indicator-throttle",
   "indicator-brake", "throttle-value", "brake-value", "throttle-fill", "brake-fill",
   "throttle-meter", "brake-meter", "steering-wheel", "steering-value", "packet-count",
@@ -138,6 +145,16 @@ export class DashboardController {
   now() { return this.window.performance.now(); }
   setText(id, text) { this.ui[id].textContent = String(text); }
   setStatus(message) { this.setText("status-message", message); }
+
+  setSpeed(kmh) {
+    this.setText("speed-value", kmh);
+    this.ui["speed-value"].setAttribute("aria-label", `سرعت شبیه‌ساز ${kmh} کیلومتر بر ساعت`);
+  }
+
+  clearSpeed() {
+    this.setText("speed-value", "—");
+    this.ui["speed-value"].setAttribute("aria-label", "سرعت هنوز دریافت نمی‌شود");
+  }
 
   setSocketStatus(text, color) {
     this.setText("ws-status", text);
@@ -301,6 +318,7 @@ export class DashboardController {
       this.window.clearTimeout(this.connectTimer);
       this.connectTimer = null;
       this.wsControl = null;
+      this.clearSpeed();
       this.stopInferenceLoop("ارتباط قطع شد؛ ارسال متوقف است. پس از اتصال دوباره، شروع را بزنید.", { sendStop: false });
       this.scheduleReconnect();
     };
@@ -315,7 +333,10 @@ export class DashboardController {
         const reply = JSON.parse(event.data);
         if (reply?.type === "error") {
           this.stopInferenceLoop("سرور فرمان را نپذیرفت. قرارداد پیام و لاگ سرور را بررسی کنید.", { sendStop: false });
+          return;
         }
+        const speed = applyTelemetry(reply);
+        if (speed !== null) this.setSpeed(speed);
       } catch {
         // Unknown/non-JSON server frames are not driving commands.
       }
