@@ -2,9 +2,16 @@
 
 from django.http import JsonResponse
 from django.views.decorators.http import require_safe
+from django.views.generic import TemplateView
 
 # Development phase reported by the health endpoint.
-PHASE = 1
+PHASE = 2
+
+
+class SimulatorView(TemplateView):
+    """Serve the Three.js scene page at the site root."""
+
+    template_name = "simulation/index.html"
 
 
 @require_safe

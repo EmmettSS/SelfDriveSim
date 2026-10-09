@@ -1,0 +1,121 @@
+{% load static %}<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>شبیه‌ساز خودران</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* The canvas fills the viewport; every overlay sits on top of it. */
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      background: #0d1117;
+      font-family: 'Vazirmatn', 'Segoe UI', Tahoma, sans-serif;
+    }
+
+    #scene-canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    #hud-top {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      display: flex;
+      gap: 10px;
+      padding: 10px 14px;
+      border-radius: 12px;
+      background: rgba(13, 17, 23, 0.72);
+      color: #e6edf3;
+      font-size: 15px;
+      line-height: 1.5;
+      backdrop-filter: blur(6px);
+    }
+
+    .hud-item {
+      display: flex;
+      align-items: baseline;
+      gap: 6px;
+      padding-inline: 10px;
+      border-inline-start: 1px solid rgba(230, 237, 243, 0.18);
+    }
+
+    .hud-item:first-child {
+      border-inline-start: 0;
+      padding-inline-start: 0;
+    }
+
+    .hud-label {
+      color: #9aa7b4;
+      font-size: 13px;
+    }
+
+    .hud-value {
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .hud-unit {
+      color: #9aa7b4;
+      font-size: 12px;
+    }
+
+    /* Connection state colours, toggled from scene.js. */
+    #ws-status.is-connected { color: #3fb950; }
+    #ws-status.is-disconnected { color: #f85149; }
+    #ws-status.is-pending { color: #d29922; }
+
+    #hud-legend {
+      position: fixed;
+      bottom: 16px;
+      right: 16px;
+      padding: 8px 12px;
+      border-radius: 10px;
+      background: rgba(13, 17, 23, 0.6);
+      color: #9aa7b4;
+      font-size: 13px;
+    }
+
+    #hud-legend kbd {
+      display: inline-block;
+      padding: 0 5px;
+      border: 1px solid rgba(230, 237, 243, 0.3);
+      border-radius: 4px;
+      color: #e6edf3;
+      font-family: inherit;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="scene-canvas"></canvas>
+
+  <div id="hud-top">
+    <div class="hud-item">
+      <span class="hud-label">اتصال</span>
+      <span id="ws-status" class="hud-value is-pending">در حال اتصال…</span>
+    </div>
+    <div class="hud-item">
+      <span class="hud-label">سرعت</span>
+      <span id="speed-value" class="hud-value">0</span>
+      <span class="hud-unit">km/h</span>
+    </div>
+    <div class="hud-item">
+      <span class="hud-label">FPS</span>
+      <span id="fps-value" class="hud-value">–</span>
+    </div>
+  </div>
+
+  <div id="hud-legend">
+    <kbd>↑</kbd>/<kbd>W</kbd> گاز &nbsp;·&nbsp; <kbd>↓</kbd>/<kbd>S</kbd> ترمز &nbsp;·&nbsp; <kbd>←</kbd>/<kbd>→</kbd>/<kbd>A</kbd>/<kbd>D</kbd> فرمان
+  </div>
+
+  <script type="module" src="{% static 'simulation/js/scene.js' %}"></script>
+</body>
+</html>
