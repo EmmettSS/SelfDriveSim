@@ -1,0 +1,23 @@
+# Phase 1: web server stack
+Django>=5.2,<5.3
+channels>=4.1,<5.0
+channels-redis>=4.2,<5.0
+daphne>=4.1,<5.0
+redis>=5.0,<6.0
+
+# ML stack (used from phase 4 onward).
+# tensorflow-decision-forests, a dependency of tensorflowjs, ships no Windows
+# wheels for TensorFlow 2.16+, so the TensorFlow packages are installed on
+# Linux and macOS only. On Windows, run the ML toolchain inside WSL2.
+tensorflowjs>=4.20,<5.0; sys_platform != "win32"
+tensorflow>=2.16,<3.0; sys_platform != "win32"
+huggingface-hub>=0.23,<1.0
+numpy>=1.26,<2.0
+Pillow>=10.3,<11.0
+python-dotenv>=1.0,<2.0
+
+# Testing
+pytest>=8.0,<9.0
+pytest-django>=4.8,<5.0
+pytest-asyncio>=0.23,<1.0
+websockets>=12.0,<13.0
