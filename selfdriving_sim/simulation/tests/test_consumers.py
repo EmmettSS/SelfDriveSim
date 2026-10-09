@@ -38,7 +38,11 @@ async def test_command_from_control_reaches_render():
     command = {"steering": 0.25, "throttle": 0.5, "brake": 0.0, "turn_signal": 1}
     await control.send_json_to(command)
 
-    assert await render.receive_json_from(timeout=RECEIVE_TIMEOUT) == command
+    # The renderer gets the command with a type field it can dispatch on.
+    assert await render.receive_json_from(timeout=RECEIVE_TIMEOUT) == {
+        "type": "control_update",
+        **command,
+    }
     # The sender must not receive its own command back.
     assert await control.receive_nothing(timeout=0.1)
 

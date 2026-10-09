@@ -144,5 +144,9 @@ class RenderConsumer(AsyncJsonWebsocketConsumer):
         await self.channel_layer.group_discard(RENDER_GROUP, self.channel_name)
 
     async def control_update(self, event):
-        """Send one validated command to the browser as a flat JSON object."""
-        await self.send_json(event["command"])
+        """Send one validated command to the browser.
+
+        The frame carries ``"type": "control_update"`` so the renderer can tell
+        commands apart from other messages it may receive later.
+        """
+        await self.send_json({"type": "control_update", **event["command"]})
