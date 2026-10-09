@@ -2,8 +2,8 @@
 
 - ``/admin/``: Django admin site.
 - ``/health/``: liveness probe that reports the current development phase.
-- The simulation app is included at the root. Its pages arrive in phase 2.
-- The mobile client app is mounted under ``/client/``. Its pages arrive in phase 3.
+- The Three.js simulation is included at the root.
+- The mobile camera dashboard is mounted under ``/dashboard/``.
 """
 
 from django.contrib import admin
@@ -15,5 +15,5 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("health/", health, name="health"),
     path("", include("simulation.urls")),
-    path("client/", include("client.urls")),
+    path("dashboard/", include("client.urls")),
 ]

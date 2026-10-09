@@ -114,6 +114,14 @@ class ControlConsumer(AsyncJsonWebsocketConsumer):
             await self._reject(str(exc))
             return
 
+        # Log the validated controls only, never image data or an untrusted payload.
+        logger.info(
+            "Control /ws/control/ steering=%.3f throttle=%.3f brake=%.3f turn_signal=%d",
+            command["steering"],
+            command["throttle"],
+            command["brake"],
+            command["turn_signal"],
+        )
         await self.channel_layer.group_send(
             RENDER_GROUP,
             {"type": "control.update", "command": command},

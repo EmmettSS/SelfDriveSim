@@ -1,0 +1,21 @@
+{
+  "name": "selfdrivesim-client",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "description": "Local styles and browser tests for the mobile simulation dashboard",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build:css": "tailwindcss -i client/styles/dashboard.css -o client/static/client/css/dashboard.css --minify",
+    "watch:css": "tailwindcss -i client/styles/dashboard.css -o client/static/client/css/dashboard.css --watch",
+    "test": "node --test simulation/tests/js/*.test.mjs client/tests/js/*.test.mjs",
+    "test:browser": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.0",
+    "@tailwindcss/cli": "4.3.0",
+    "tailwindcss": "4.3.0"
+  }
+}

@@ -1,8 +1,8 @@
 """Django settings for the SelfDriveSim server.
 
-Phase 1 scope: ASGI served by Daphne, Django Channels, a Redis channel layer
-and the two WebSocket endpoints. Machine-specific values can be overridden
-with environment variables or a local, Git-ignored ``.env`` file.
+ASGI is served by Daphne, with Django Channels and a Redis channel layer.
+Machine-specific values can be overridden with environment variables or a
+local, Git-ignored ``.env`` file.
 """
 
 import os
@@ -46,6 +46,12 @@ MIDDLEWARE = [
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
+
+# Opt-in only for an embedded development preview. Keep clickjacking protection
+# for normal local/ngrok use and never enable this outside development.
+ALLOW_IFRAME_PREVIEW = DEBUG and os.environ.get("DJANGO_ALLOW_IFRAME_PREVIEW") == "1"
+if ALLOW_IFRAME_PREVIEW:
+    MIDDLEWARE.remove("django.middleware.clickjacking.XFrameOptionsMiddleware")
 
 ROOT_URLCONF = "selfdriving_sim.urls"
 WSGI_APPLICATION = "selfdriving_sim.wsgi.application"
@@ -116,3 +122,23 @@ CSRF_TRUSTED_ORIGINS += [
 
 # Value of the Cross-Origin-Opener-Policy header set by SecurityMiddleware.
 SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin-allow-popups"
+
+# Phase 3 diagnostics: one line per validated frame, visible in runserver/Daphne.
+# Set SIMULATION_CONTROL_LOG_LEVEL=WARNING to silence the 20 Hz stream.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "control": {"format": "{asctime} {levelname} {name}: {message}", "style": "{"},
+    },
+    "handlers": {
+        "control_console": {"class": "logging.StreamHandler", "formatter": "control"},
+    },
+    "loggers": {
+        "simulation.consumers": {
+            "handlers": ["control_console"],
+            "level": os.environ.get("SIMULATION_CONTROL_LOG_LEVEL", "INFO"),
+            "propagate": False,
+        },
+    },
+}
