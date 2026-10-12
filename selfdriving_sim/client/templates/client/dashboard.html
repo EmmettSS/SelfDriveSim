@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="theme-color" content="#0b1012">
-  <meta name="description" content="داشبورد موبایل شبیه‌ساز خودران؛ دوربین عقب و آزمایش ارسال فرمان با مدل Mock.">
+  <meta name="description" content="داشبورد موبایل شبیه‌ساز خودران؛ دوربین عقب، مدل DAVE-2-GRU روی گوشی و حالت Mock.">
   <title>کابین کنترل | SelfDriveSim</title>
   <link rel="icon" href="data:,">
   <link rel="preload" href="{% static 'client/fonts/Vazirmatn.woff2' %}" as="font" type="font/woff2" crossorigin>
@@ -12,10 +12,10 @@
 </head>
 <body>
   <video id="camera-feed" autoplay muted playsinline aria-label="تصویر زنده دوربین عقب"></video>
-  <canvas id="process-canvas" width="200" height="66" hidden aria-hidden="true"></canvas>
+  <canvas id="process-canvas" width="160" height="120" hidden aria-hidden="true"></canvas>
   <div class="camera-shade" aria-hidden="true"></div>
 
-  <main id="dashboard" class="dashboard-shell">
+  <main id="dashboard" class="dashboard-shell" data-model-url="{% static 'client/models/dave2/model.json' %}">
     <header class="dashboard-header flex items-center justify-between gap-3">
       <div class="flex items-center gap-3">
         <span class="brand-mark" aria-hidden="true">
@@ -27,8 +27,8 @@
         </div>
       </div>
       <div class="flex items-center gap-3">
-        <span class="phase-label hidden sm:inline">فاز ۰۳</span>
-        <span class="mode-badge" dir="ltr"><span class="mode-dot" aria-hidden="true"></span>MOCK MODE</span>
+        <span class="phase-label hidden sm:inline">فاز ۰۴</span>
+        <span class="mode-badge" dir="ltr"><span class="mode-dot" aria-hidden="true"></span><span id="mode-badge">MOCK MODE</span></span>
       </div>
     </header>
 
@@ -144,7 +144,7 @@
 
       <div class="session-strip flex items-center justify-between gap-3">
         <span class="flex items-center gap-1.5"><span class="text-muted">فرمان ارسالی</span><span id="packet-count" class="font-mono" dir="ltr">0</span></span>
-        <span class="font-mono text-muted" dir="ltr">INPUT 200 × 66</span>
+        <span class="font-mono text-muted" dir="ltr">INPUT 160 × 120</span>
         <span class="text-muted">مدل آزمایشی</span>
       </div>
 
@@ -162,6 +162,7 @@
     <noscript><p class="noscript-warning">برای استفاده از دوربین و ارسال فرمان، JavaScript مرورگر را فعال کنید.</p></noscript>
   </main>
 
+  <script src="{% static 'client/js/vendor/tf.min.js' %}"></script>
   <script type="module" src="{% static 'client/js/inference.js' %}"></script>
 </body>
 </html>

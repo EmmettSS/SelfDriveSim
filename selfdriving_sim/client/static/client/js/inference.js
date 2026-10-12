@@ -1,14 +1,33 @@
 /**
- * Phone-side camera and Mock control pipeline.
+ * Phone-side camera, DAVE-2-GRU inference and Mock control pipeline.
  *
  * Only four numeric controls leave the phone; camera frames stay on its canvas.
- * Replace mockInference at the inference boundary in phase 4. Do not substitute
- * a model's preprocessing or output contract until that model is inspected.
+ * The model runs in the browser with TensorFlow.js (window.tf, vendored next to
+ * this file). If the model does not load, the dashboard uses mockInference.
+ *
+ * The input contract is the one the checkpoint was trained on and that
+ * models/dave2_config.py documents: SEQUENCE_LENGTH consecutive RGB frames of
+ * FRAME_WIDTH x FRAME_HEIGHT, as raw 0..255 pixel values. The network normalizes
+ * them itself, so the phone must not scale them (see preprocessFrame).
  */
 
+import { withResetAfterGRU } from "./reset-after-gru.js";
+
 export const SEND_INTERVAL_MS = 50;
-export const FRAME_WIDTH = 200;
-export const FRAME_HEIGHT = 66;
+/** Model input: SEQUENCE_LENGTH consecutive RGB frames of 160 × 120. */
+export const FRAME_WIDTH = 160;
+export const FRAME_HEIGHT = 120;
+export const SEQUENCE_LENGTH = 3;
+/**
+ * Gap between the frames of one window, in ticks. The training pipeline slides a
+ * window of three consecutive frames over the recorded stream, so the gap is 1.
+ */
+export const FRAME_STRIDE = 1;
+/** Served by Django; the dashboard element's data-model-url overrides it. */
+export const MODEL_URL = "/static/client/models/dave2/model.json";
+export const MODEL_LOAD_TIMEOUT_MS = 20000;
+export const MODEL_OUTPUTS = Object.freeze(["steering", "throttle", "brake", "turn_signal"]);
+export const TURN_SIGNAL_CLASSES = 3;
 export const MAX_RECONNECT_ATTEMPTS = 10;
 export const CONNECT_TIMEOUT_MS = 10000;
 export const MAX_BUFFERED_BYTES = 1024;
@@ -82,6 +101,152 @@ export class SendRateCounter {
   }
 }
 
+/**
+ * Keeps the frames one inference needs. With SEQUENCE_LENGTH 3 and FRAME_STRIDE 1
+ * the window spans three ticks and holds the frames t-2, t-1 and t. Frames that
+ * leave the window go to the injected dispose callback.
+ */
+export class FrameWindow {
+  constructor({ length = SEQUENCE_LENGTH, stride = FRAME_STRIDE, dispose = () => {} } = {}) {
+    this.length = length;
+    this.stride = stride;
+    this.span = (length - 1) * stride + 1;
+    this.dispose = dispose;
+    this.frames = [];
+  }
+
+  get ready() {
+    return this.frames.length >= this.span;
+  }
+
+  push(frame) {
+    this.frames.push(frame);
+    while (this.frames.length > this.span) this.dispose(this.frames.shift());
+  }
+
+  /** Returns the frames for one inference, oldest first. The window still owns them. */
+  sequence() {
+    if (!this.ready) throw new Error("Frame window is not full yet");
+    const start = this.frames.length - this.span;
+    return Array.from({ length: this.length }, (_, i) => this.frames[start + i * this.stride]);
+  }
+
+  clear() {
+    for (const frame of this.frames) this.dispose(frame);
+    this.frames = [];
+  }
+}
+
+/**
+ * Reads the canvas as RGB float values in 0..255. The caller owns the tensor.
+ *
+ * No division by 255 here: the checkpoint was trained on raw pixel values and
+ * normalized them in its first layer. models/extend_model.py folds that
+ * normalization into the first convolution, so the converted model still expects
+ * 0..255 and dividing again would darken every frame to a 255th of its value.
+ */
+export function preprocessFrame(tf, canvas) {
+  return tf.tidy(() => tf.browser.fromPixels(canvas, 3).toFloat());
+}
+
+function tensorsOf(value) {
+  if (value == null) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+/** Checks a loaded model against the input and output contract of models/dave2_config.py. */
+export function validateModelContract(model) {
+  const expected = [null, SEQUENCE_LENGTH, FRAME_HEIGHT, FRAME_WIDTH, 3];
+  const inputs = model.inputs ?? [];
+  if (inputs.length !== 1 || JSON.stringify(inputs[0].shape) !== JSON.stringify(expected)) {
+    const found = inputs.map((input) => JSON.stringify(input.shape)).join(", ");
+    throw new Error(`Model input must be ${JSON.stringify(expected)}, found ${found || "none"}`);
+  }
+  const names = model.outputNames ?? [];
+  const missing = MODEL_OUTPUTS.filter((name) => !names.includes(name));
+  if (missing.length > 0) throw new Error(`Model has no output named ${missing.join(", ")}`);
+}
+
+/**
+ * Loads the converted model and checks its contract. `source` is a URL or an IO
+ * handler (tests load from memory). One prediction on zeros then compiles the
+ * WebGL shaders, so the first real frame is not delayed.
+ */
+export async function loadModel(tf, source = MODEL_URL) {
+  const model = await tf.loadLayersModel(withResetAfterGRU(tf, source));
+  try {
+    validateModelContract(model);
+    warmUp(tf, model);
+  } catch (error) {
+    model.dispose();
+    throw error;
+  }
+  return model;
+}
+
+/** Runs one prediction on zeros, in the shape the model itself declares. */
+export function warmUp(tf, model) {
+  const shape = model.inputs[0].shape.map((size) => (size === null || size === undefined ? 1 : size));
+  tf.tidy(() => model.predict(tf.zeros(shape)));
+}
+
+function namedOutputs(model, predicted) {
+  const tensors = tensorsOf(predicted);
+  const named = {};
+  model.outputNames.forEach((name, index) => { named[name] = tensors[index]; });
+  for (const name of MODEL_OUTPUTS) {
+    if (!named[name]) throw new Error(`Model did not return ${name}`);
+  }
+  return named;
+}
+
+const roundTo3 = (value) => Number(value.toFixed(3));
+const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
+
+/**
+ * Turns the four heads into the protocol command. The steering and throttle heads
+ * are clamped to their ranges, and the turn signal is the most probable class.
+ */
+export function toCommand({ steering, throttle, brake, turnProbabilities }) {
+  const probabilities = Array.from(turnProbabilities);
+  const values = [steering, throttle, brake, ...probabilities];
+  if (probabilities.length !== TURN_SIGNAL_CLASSES || !values.every(Number.isFinite)) {
+    throw new Error("Model returned a non-finite or incomplete output");
+  }
+  return {
+    steering: roundTo3(clamp(steering, -1, 1)),
+    throttle: roundTo3(clamp(throttle, 0, 1)),
+    brake: roundTo3(clamp(brake, 0, 1)),
+    turn_signal: probabilities.indexOf(Math.max(...probabilities)),
+  };
+}
+
+/**
+ * One inference on SEQUENCE_LENGTH frames, oldest first. The frame tensors stay
+ * with the caller. This function disposes only the tensors it creates.
+ */
+export async function realInference(tf, model, frames) {
+  // tidy disposes the intermediate stacked tensor and keeps only the batched input.
+  const input = tf.tidy(() => tf.stack(frames).expandDims(0));
+  let predicted = null;
+  try {
+    predicted = model.predict(input);
+    const named = namedOutputs(model, predicted);
+    const [steering, throttle, brake, turn] = await Promise.all(
+      MODEL_OUTPUTS.map((name) => named[name].data()),
+    );
+    return toCommand({
+      steering: steering[0],
+      throttle: throttle[0],
+      brake: brake[0],
+      turnProbabilities: turn,
+    });
+  } finally {
+    input.dispose();
+    for (const tensor of tensorsOf(predicted)) tensor.dispose();
+  }
+}
+
 const ELEMENT_IDS = [
   "camera-feed", "process-canvas", "camera-prompt", "camera-title", "camera-message",
   "camera-status", "camera-resolution", "camera-dot", "btn-camera", "btn-reconnect",
@@ -89,17 +254,39 @@ const ELEMENT_IDS = [
   "status-message", "indicator-left", "indicator-right", "indicator-throttle",
   "indicator-brake", "throttle-value", "brake-value", "throttle-fill", "brake-fill",
   "throttle-meter", "brake-meter", "steering-wheel", "steering-value", "packet-count",
+  "mode-badge",
 ];
 
-/** Own all streams, sockets and timers so retry/stop/navigation cannot duplicate them. */
+/**
+ * Owns all streams, sockets and timers so retry/stop/navigation cannot duplicate them.
+ * `runtime` injects TensorFlow.js and the inference functions; tests pass fakes.
+ * Without window.tf, or when the model fails to load, the dashboard uses Mock.
+ */
 export class DashboardController {
-  constructor({ window: browserWindow, document: browserDocument }) {
+  constructor({
+    window: browserWindow,
+    document: browserDocument,
+    modelUrl = MODEL_URL,
+    runtime = {},
+    logger = console,
+  }) {
     this.window = browserWindow;
     this.document = browserDocument;
+    this.logger = logger;
+    this.modelUrl = modelUrl;
+    this.runtime = {
+      tf: browserWindow.tf ?? null,
+      loadModel,
+      preprocess: preprocessFrame,
+      infer: realInference,
+      ...runtime,
+    };
     this.ui = Object.fromEntries(ELEMENT_IDS.map((id) => [id, browserDocument.getElementById(id)]));
     this.video = this.ui["camera-feed"];
     this.canvas = this.ui["process-canvas"];
     this.context = this.canvas.getContext("2d", { alpha: false });
+    // drawImage performs the resize to the model size; high quality reduces aliasing.
+    if (this.context) this.context.imageSmoothingQuality = "high";
     this.stream = null;
     this.cameraReady = false;
     this.cameraTask = null;
@@ -114,6 +301,17 @@ export class DashboardController {
     this.destroyed = false;
     this.packetCount = 0;
     this.rate = new SendRateCounter();
+    // Model state: idle | loading | ready | failed. Mock runs unless the model is ready.
+    this.mode = "mock";
+    this.modelState = "idle";
+    this.modelError = null;
+    this.model = null;
+    this.modelTask = null;
+    this.modelTimer = null;
+    this.modelGeneration = 0;
+    this.frames = new FrameWindow({ dispose: (tensor) => tensor?.dispose?.() });
+    this.inferencePending = false;
+    this.runGeneration = 0;
 
     this.handlers = {
       start: () => this.startInferenceLoop(),
@@ -166,9 +364,74 @@ export class DashboardController {
 
   updateButtons() {
     const canStart = this.cameraReady && this.wsControl?.readyState === 1
-      && !this.suspended && !this.destroyed && !this.document.hidden;
+      && !this.suspended && !this.destroyed && !this.document.hidden
+      && this.modelState !== "loading";
     this.ui["btn-start"].disabled = !canStart || this.running;
     this.ui["btn-stop"].disabled = !this.running;
+  }
+
+  /**
+   * Starts loading the model once. A failed load is not final: the next init()
+   * (for example from the camera button) tries again.
+   */
+  ensureModel() {
+    if (this.destroyed || this.modelState === "ready") return Promise.resolve(this.modelState === "ready");
+    if (this.modelTask) return this.modelTask;
+    if (!this.runtime.tf) {
+      this.modelState = "failed";
+      this.modelError = "TensorFlow.js did not load";
+      this.logger.warn("[Model] TensorFlow.js is not loaded; using Mock");
+      this.updateModelStatus();
+      return Promise.resolve(false);
+    }
+
+    const generation = ++this.modelGeneration;
+    this.modelState = "loading";
+    this.modelError = null;
+    this.updateModelStatus();
+    // The async wrapper turns a synchronous throw into a rejection.
+    const pending = (async () => this.runtime.loadModel(this.runtime.tf, this.modelUrl))();
+    const timeout = new Promise((_, reject) => {
+      this.modelTimer = this.window.setTimeout(
+        () => reject(new Error(`no response after ${MODEL_LOAD_TIMEOUT_MS} ms`)),
+        MODEL_LOAD_TIMEOUT_MS,
+      );
+    });
+    this.modelTask = Promise.race([pending, timeout])
+      .then((model) => {
+        if (generation !== this.modelGeneration || this.destroyed) {
+          model?.dispose?.();
+          return false;
+        }
+        this.model = model;
+        this.modelState = "ready";
+        this.logger.info("[Model] Loaded", { url: this.modelUrl });
+        this.setStatus("مدل DAVE-2-GRU بارگذاری شد. پس از اتصال دوربین و ارتباط، شروع را بزنید.");
+        return true;
+      }, (error) => {
+        // A load that finishes after its timeout must not keep its tensors alive.
+        pending.then((late) => late?.dispose?.(), () => {});
+        if (generation === this.modelGeneration) {
+          this.modelState = "failed";
+          this.modelError = error?.message ?? String(error);
+          this.logger.warn("[Model] Load failed; using Mock", this.modelError);
+          this.setStatus("مدل بارگذاری نشد؛ شروع خودران فرمان‌های Mock می‌فرستد.");
+        }
+        return false;
+      })
+      .finally(() => {
+        this.window.clearTimeout(this.modelTimer);
+        this.modelTimer = null;
+        this.modelTask = null;
+        this.updateModelStatus();
+      });
+    return this.modelTask;
+  }
+
+  updateModelStatus() {
+    const badges = { idle: "MOCK MODE", loading: "MODEL LOADING", ready: "DAVE-2 GRU", failed: "MOCK MODE" };
+    this.setText("mode-badge", badges[this.modelState] ?? "MOCK MODE");
+    this.updateButtons();
   }
 
   showCameraPrompt(title, message, canRetry = true) {
@@ -182,6 +445,8 @@ export class DashboardController {
   async init() {
     if (this.destroyed || this.document.hidden) return false;
     this.suspended = false;
+    // The model loads in parallel with the camera permission request.
+    void this.ensureModel();
     if (await this.startCamera()) {
       if (!this.suspended && !this.destroyed && !this.document.hidden) {
         this.reconnectAttempt = 0;
@@ -311,7 +576,7 @@ export class DashboardController {
       this.reconnectAttempt = 0;
       this.setSocketStatus("متصل", "green");
       this.setText("run-status", "آمادهٔ شروع");
-      this.setStatus("دوربین و ارتباط آماده‌اند. برای ارسال Mock، شروع خودران را بزنید.");
+      this.setStatus("دوربین و ارتباط آماده‌اند. برای ارسال فرمان، شروع خودران را بزنید.");
     };
     socket.onclose = () => {
       if (socket !== this.wsControl) return;
@@ -380,7 +645,7 @@ export class DashboardController {
     this.updateButtons();
   }
 
-  /** Resize only for now; phase 4 supplies the model-specific tensor pipeline. */
+  /** Draws the video into the model-sized canvas. drawImage performs the resize. */
   captureFrame() {
     if (!this.cameraReady || this.video.readyState < 2 || !this.video.videoWidth || !this.video.videoHeight) return false;
     if (!this.context) throw new Error("Canvas 2D is unavailable");
@@ -405,12 +670,18 @@ export class DashboardController {
     if (this.running || !this.cameraReady || this.wsControl?.readyState !== 1
       || this.suspended || this.destroyed || this.document.hidden) return false;
     this.running = true;
+    this.mode = this.modelState === "ready" ? "model" : "mock";
     this.startedAt = this.now();
     this.rate.reset(this.startedAt);
     this.setText("fps-value", "0");
     this.ui["run-dot"].classList.add("active");
-    this.setText("run-status", "در حال ارسال · Mock");
-    this.setStatus("فرمان‌های آزمایشی ارسال می‌شوند؛ مدل واقعی در این فاز اجرا نمی‌شود.");
+    if (this.mode === "model") {
+      this.setText("run-status", "در حال ارسال · DAVE-2-GRU");
+      this.setStatus("فرمان‌های مدل ارسال می‌شوند. تا پر شدن پنجرهٔ فریم‌ها، فرمان خنثی ارسال می‌شود.");
+    } else {
+      this.setText("run-status", "در حال ارسال · Mock");
+      this.setStatus("فرمان‌های آزمایشی ارسال می‌شوند؛ مدل در دسترس نیست.");
+    }
     this.loopTimer = this.window.setInterval(() => this.inferenceTick(), SEND_INTERVAL_MS);
     this.updateButtons();
     return true;
@@ -440,19 +711,70 @@ export class DashboardController {
       this.setText("fps-value", this.rate.sample(now, false));
       return;
     }
-    const output = mockInference((now - this.startedAt) / 1000);
+    if (this.mode === "model") {
+      this.modelTick(now);
+      return;
+    }
+    this.dispatchCommand(mockInference((now - this.startedAt) / 1000), now);
+  }
+
+  /** Sends one command and updates the HUD. A failed send stops the loop. */
+  dispatchCommand(output, now) {
     if (!this.sendCommand(output)) {
       this.stopInferenceLoop("ارسال فرمان ناموفق بود؛ اتصال را بررسی کنید.", { sendStop: false });
       this.wsControl?.close(4000, "Control send failed");
-      return;
+      return false;
     }
     this.updateIndicators(output);
     this.setText("fps-value", this.rate.sample(now, true));
+    return true;
+  }
+
+  /**
+   * Model mode. Every tick adds the newest frame to the window. Until the window is
+   * full, the neutral command is sent. After that, one inference runs at a time, and
+   * ticks that arrive during it are skipped, so stale commands never queue up.
+   */
+  modelTick(now) {
+    const { tf, preprocess, infer } = this.runtime;
+    let sequence;
+    try {
+      this.frames.push(preprocess(tf, this.canvas));
+      if (!this.frames.ready) {
+        this.dispatchCommand(IDLE_COMMAND, now);
+        return;
+      }
+      if (this.inferencePending) return;
+      sequence = this.frames.sequence();
+    } catch (error) {
+      this.logger.error("[Model] Frame preprocessing failed", error);
+      this.stopInferenceLoop("پردازش تصویر برای مدل ناموفق بود؛ ارسال متوقف شد.");
+      return;
+    }
+
+    this.inferencePending = true;
+    const generation = this.runGeneration;
+    // The async wrapper turns a synchronous throw into a rejection.
+    (async () => infer(tf, this.model, sequence))()
+      .then((output) => {
+        if (generation === this.runGeneration) this.dispatchCommand(output, this.now());
+      }, (error) => {
+        if (generation !== this.runGeneration) return;
+        this.logger.error("[Model] Inference failed", error);
+        this.stopInferenceLoop("اجرای مدل ناموفق بود؛ ارسال متوقف شد. برای تلاش دوباره، شروع را بزنید.");
+      })
+      .finally(() => {
+        if (generation === this.runGeneration) this.inferencePending = false;
+      });
   }
 
   stopInferenceLoop(message = null, { sendStop = true } = {}) {
     const wasRunning = this.running;
     this.running = false;
+    // Results of an inference still in flight belong to the stopped run and are dropped.
+    this.runGeneration += 1;
+    this.inferencePending = false;
+    this.frames.clear();
     this.window.clearInterval(this.loopTimer);
     this.loopTimer = null;
     // Best effort only: a socket send is not an acknowledgement from the renderer.
@@ -501,6 +823,9 @@ export class DashboardController {
   destroy() {
     this.suspend();
     this.destroyed = true;
+    this.modelGeneration += 1;
+    this.model?.dispose?.();
+    this.model = null;
     this.ui["btn-start"].removeEventListener("click", this.handlers.start);
     this.ui["btn-stop"].removeEventListener("click", this.handlers.stop);
     this.ui["btn-camera"].removeEventListener("click", this.handlers.camera);
@@ -513,6 +838,11 @@ export class DashboardController {
 }
 
 if (typeof document !== "undefined" && document.getElementById("dashboard")) {
-  const dashboard = new DashboardController({ window, document });
+  const dashboardElement = document.getElementById("dashboard");
+  const dashboard = new DashboardController({
+    window,
+    document,
+    modelUrl: dashboardElement.dataset.modelUrl || MODEL_URL,
+  });
   void dashboard.init();
 }
