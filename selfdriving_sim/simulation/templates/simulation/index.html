@@ -72,6 +72,25 @@
       font-size: 12px;
     }
 
+    /* Collision and wall counters turn red once they are above zero. */
+    #collision-count.is-hot,
+    #wall-count.is-hot {
+      color: #f85149;
+    }
+
+    /* Turn-signal arrows share the 3 Hz phase of the 3D lamps. */
+    .turn-arrow {
+      color: rgba(230, 237, 243, 0.25);
+      font-size: 18px;
+      font-weight: 900;
+      transition: none;
+    }
+
+    .turn-arrow.is-lit {
+      color: #ffeb3b;
+      text-shadow: 0 0 8px rgba(255, 235, 59, 0.8);
+    }
+
     .dashboard-link {
       display: inline-block;
       margin-inline-start: 16px;
@@ -103,6 +122,58 @@
       color: #e6edf3;
       font-family: inherit;
     }
+
+    /*
+     * Full-screen hazard flash, shown on collisions (red) and wall grinding
+     * (orange). The phone camera sees it too, so the flash doubles as the
+     * visual warning channel towards the driving model.
+     */
+    #hazard-flash {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      opacity: 0;
+    }
+
+    #hazard-flash.is-running.is-collision {
+      animation: hazard-fade-red 1s ease-out forwards;
+    }
+
+    #hazard-flash.is-running.is-wall {
+      animation: hazard-fade-orange 0.8s ease-out forwards;
+    }
+
+    #hazard-flash.is-collision {
+      background: rgba(220, 38, 38, 0.35);
+    }
+
+    #hazard-flash.is-wall {
+      background: rgba(234, 138, 30, 0.3);
+    }
+
+    #hazard-flash-text {
+      margin-top: -10vh;
+      padding: 14px 28px;
+      border-radius: 14px;
+      background: rgba(13, 17, 23, 0.8);
+      color: #ffe08a;
+      font-size: 30px;
+      font-weight: 800;
+    }
+
+    @keyframes hazard-fade-red {
+      0% { opacity: 1; }
+      60% { opacity: 0.8; }
+      100% { opacity: 0; }
+    }
+
+    @keyframes hazard-fade-orange {
+      0% { opacity: 1; }
+      100% { opacity: 0; }
+    }
   </style>
 </head>
 <body>
@@ -119,13 +190,35 @@
       <span class="hud-unit">km/h</span>
     </div>
     <div class="hud-item">
+      <span class="hud-label">زاویه</span>
+      <span id="heading-value" class="hud-value">0°</span>
+    </div>
+    <div class="hud-item">
+      <span class="hud-label">راهنما</span>
+      <span id="turn-left" class="turn-arrow" aria-label="راهنمای چپ">◀</span>
+      <span id="turn-right" class="turn-arrow" aria-label="راهنمای راست">▶</span>
+    </div>
+    <div class="hud-item">
+      <span class="hud-label">برخورد</span>
+      <span id="collision-count" class="hud-value">0</span>
+    </div>
+    <div class="hud-item">
+      <span class="hud-label">دیوار</span>
+      <span id="wall-count" class="hud-value">0</span>
+    </div>
+    <div class="hud-item">
       <span class="hud-label">FPS</span>
       <span id="fps-value" class="hud-value">–</span>
     </div>
   </div>
 
+  <div id="hazard-flash" aria-live="assertive">
+    <span id="hazard-flash-text"></span>
+  </div>
+
   <div id="hud-legend">
     <kbd>↑</kbd>/<kbd>W</kbd> گاز &nbsp;·&nbsp; <kbd>↓</kbd>/<kbd>S</kbd> ترمز &nbsp;·&nbsp; <kbd>←</kbd>/<kbd>→</kbd>/<kbd>A</kbd>/<kbd>D</kbd> فرمان
+    <span aria-hidden="true">·</span> بدون فرمان گوشی، کیبورد می‌راند
     <a class="dashboard-link" href="{% url 'client:dashboard' %}" target="_blank" rel="noopener">داشبورد موبایل ↗</a>
   </div>
 

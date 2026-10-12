@@ -1,16 +1,23 @@
 /**
- * Three.js driving scene for the closed-loop simulator.
+ * Three.js first-person driving scene for the closed-loop simulator.
+ *
+ * Phase 5 turned the phase-2 "world scrolls past a parked car" stage into a
+ * real closed loop: the ego car now owns a heading-based state
+ * ``{x, z, speed, heading}`` and drives through the world, while the road,
+ * the markings and the scenery follow it so the drive never ends. The camera
+ * sits on the front bumper (first-person view), which is exactly the image
+ * the DAVE-2-GRU model on the phone expects.
  *
  * The module is split in five parts:
  *
- *   1. Tuning constants.
- *   2. Pure helpers: spawn scheduling, control sanitising, the speed model and
- *      the reconnect timing. They never touch the DOM, so
- *      ``simulation/tests/js/scene.test.mjs`` can import and exercise them
- *      under Node.
- *   3. Scene construction: road, lane markings, scenery and cars.
+ *   1. Tuning constants (spec values of phase 5).
+ *   2. Pure helpers: the longitudinal/heading/position steps, the wall and
+ *      collision maths, blinker timing and the camera pose. They never touch
+ *      the DOM or WebGL, so ``simulation/tests/js/scene.test.mjs`` can import
+ *      and exercise them under Node.
+ *   3. Scene construction: endless road, lane markings, scenery and traffic.
  *   4. The simulation object that owns the state and the animation loop.
- *   5. The browser bootstrap: HUD, keyboard input and the WebSocket client.
+ *   5. The browser bootstrap: HUD, keyboard fallback, WebSocket client.
  *
  * The bootstrap only runs when a document exists, which keeps the module
  * importable in a headless test runner.
@@ -31,7 +38,7 @@ export const LANE_CENTRES = [-4, 0, 4];
 /** Paint colours of the traffic cars. */
 export const TRAFFIC_COLOURS = [0xe53935, 0xfdd835, 0x43a047, 0xfb8c00];
 
-/** Paint colour of the player car. */
+/** Paint colour of the player car (kept for the physics body and tests). */
 export const EGO_COLOUR = 0x2196f3;
 
 /** Upper bound for the number of traffic cars that exist at the same time. */
@@ -41,35 +48,113 @@ export const MAX_TRAFFIC_CARS = 20;
 export const SPAWN_DELAY_MIN_S = 2.5;
 export const SPAWN_DELAY_MAX_S = 4.5;
 
-/** Traffic closing speed in units per second: 0.15 to 0.35 per frame at 60 Hz. */
+/** Traffic oncoming speed in units per second: 0.15 to 0.35 per frame at 60 Hz. */
 export const TRAFFIC_SPEED_MIN = 0.15 * FRAME_RATE_HZ;
 export const TRAFFIC_SPEED_MAX = 0.35 * FRAME_RATE_HZ;
 
-/** z range a traffic car is spawned in, and the z at which it is recycled. */
-export const SPAWN_Z_MIN = -200;
-export const SPAWN_Z_MAX = -150;
-export const DESPAWN_Z = 10;
+/**
+ * Traffic spawns this far *ahead* of the ego car (the car drives towards -z,
+ * so "ahead" is a smaller z). A spawn is skipped when another car of the same
+ * lane is closer than MIN_LANE_GAP_M.
+ */
+export const SPAWN_GAP_MIN_M = 150;
+export const SPAWN_GAP_MAX_M = 200;
+export const MIN_LANE_GAP_M = 25;
 
-/** Road geometry. The plane covers z = -370 .. 30 around ROAD_Z_CENTRE. */
+/** A traffic car is recycled once it is this far *behind* the ego car. */
+export const DESPAWN_BEHIND_M = 15;
+
+/** Road geometry. The plane covers 400 units and follows the ego car. */
 export const ROAD_WIDTH = 20;
 export const ROAD_LENGTH = 400;
 export const ROAD_Z_CENTRE = -170;
 export const ROAD_COLOUR = 0x2a2a2a;
 
-/** Lane marking pattern, in world units. */
+/** Lane marking pattern, in world units. Its sum is the seamless scroll unit. */
 export const DASH_SIZE = 3;
 export const DASH_GAP = 3;
 
-/** Longitudinal model of the player car. */
-export const MAX_SPEED_MS = 30; // ~108 km/h, enough for the HUD in this phase
-export const ACCELERATION_MS2 = 6;
-export const BRAKE_DECELERATION_MS2 = 12;
-export const ROLLING_DRAG_MS2 = 0.8; // proportional to speed
-export const COASTING_RESISTANCE_MS2 = 0.4; // constant, so coasting comes to rest
+/**
+ * Longitudinal model of the player car — the exact spec values of phase 5:
+ * maxSpeed 20, acceleration 8, braking 20, friction 2.
+ */
+export const MAX_SPEED_MS = 20;
+export const ACCELERATION_MS2 = 8;
+export const BRAKE_DECELERATION_MS2 = 20;
+export const COASTING_FRICTION_MS2 = 2;
 
-/** Lateral model of the player car. */
-export const STEER_RATE = 7; // units per second at full lock
-export const EGO_LATERAL_LIMIT = 8.5; // keep the car on the 20 unit wide road
+/**
+ * Lateral model. ``STEER_RATE`` is the spec's steeringRate (1.5). The heading
+ * only reacts above HEADING_MIN_SPEED_MS and is scaled by min(1, speed / 5).
+ */
+export const STEER_RATE = 1.5;
+export const HEADING_MIN_SPEED_MS = 0.5;
+export const HEADING_SPEED_REF_MS = 5;
+
+/**
+ * DAVE-2 steering convention: negative = left, positive = right. The scene
+ * drives towards -z, where world +x is on the *right* of the screen, so the
+ * spec integration ``x += sin(heading) * speed * dt`` maps positive steering
+ * onto a right turn. ``STEERING_SIGN`` exists so a real-world closed-loop test
+ * can flip the whole mapping with a one-line change if the trained model ever
+ * turns out to use the opposite convention.
+ */
+export const STEERING_SIGN = 1;
+
+/**
+ * Invisible wall at |x| = 9 (the spec's off-road threshold). The user chose a
+ * hard wall over a visual penalty: the car is clamped here, grinding against
+ * the wall scrubs speed, and a hazard warning is sent to the phone.
+ */
+export const ROAD_WALL_X = 9;
+/** Constant deceleration applied while the car grinds along the wall. */
+export const WALL_SCRUB_MS2 = 15;
+/** Minimum seconds between two wall-hit events (counter + hazard message). */
+export const WALL_EVENT_COOLDOWN_S = 1;
+
+/**
+ * Turn signals blink per the spec formula ``blinkerPhase += dt * 3`` with the
+ * colour toggled on ``floor(phase) % 2`` — three state changes per second.
+ */
+export const BLINKER_PHASE_RATE = 3;
+export const BLINKER_ON_COLOUR = 0xffeb3b;
+export const BLINKER_OFF_COLOUR = 0x333333;
+export const BLINKER_SIZE = { x: 0.3, y: 0.15, z: 0.15 };
+/** Blinker position on the first-person camera (hood corners, camera space). */
+export const BLINKER_CAMERA_OFFSET = { x: 0.9, y: -0.45, z: -1.4 };
+
+/**
+ * Collision handling (user decision): red flash, full stop, a short freeze,
+ * then the car resets to the centre of the middle lane with a short immunity
+ * so overlapping traffic cannot instantly re-trigger.
+ */
+export const COLLISION_FREEZE_S = 1.0;
+export const COLLISION_IMMUNITY_S = 2.0;
+
+/** Half extents of the axis-aligned collision box of one car (body 1.8 x 4.0). */
+export const CAR_HALF_X = 1.0;
+export const CAR_HALF_Z = 2.2;
+
+/** Broad phase: cars further apart than this in one axis cannot collide. */
+export const COLLISION_BROAD_X = 2 * CAR_HALF_X + 0.5;
+export const COLLISION_BROAD_Z = 2 * CAR_HALF_Z + 0.5;
+
+/**
+ * First-person camera, mounted on the front bumper. The eye sits slightly
+ * above the hood and looks 30 units ahead at the same height, so the horizon
+ * stays level like in the training images.
+ */
+export const CAMERA_FOV = 60;
+export const CAMERA_EYE_HEIGHT = 0.75;
+export const CAMERA_BUMPER_M = 2.2;
+export const CAMERA_LOOK_AHEAD_M = 30;
+
+/**
+ * A WebSocket command stays authoritative for this long. Without fresh phone
+ * commands the keyboard fallback of phase 2 drives the car again, so the
+ * scene stays usable when no phone is connected.
+ */
+export const COMMAND_FRESH_S = 0.5;
 
 /** Reconnect policy of the render socket. */
 export const MAX_RECONNECT_ATTEMPTS = 10;
@@ -83,6 +168,9 @@ const CONTROL_FIELDS = [
   ["brake", 0, 1, false],
   ["turn_signal", 0, 2, true],
 ];
+
+/** Hazards the scene may report to the phone. Mirrors the server allow-list. */
+export const HAZARD_KINDS = Object.freeze(["collision", "wall"]);
 
 /* ------------------------------------------------------------------------- *
  * 2. Pure helpers
@@ -114,9 +202,14 @@ export function pickTrafficSpeed(random = Math.random) {
   return randomBetween(TRAFFIC_SPEED_MIN, TRAFFIC_SPEED_MAX, random);
 }
 
-/** z position a traffic car is spawned at. */
-export function pickSpawnZ(random = Math.random) {
-  return randomBetween(SPAWN_Z_MIN, SPAWN_Z_MAX, random);
+/** Distance ahead of the ego car where the next traffic car is spawned. */
+export function pickSpawnGap(random = Math.random) {
+  return randomBetween(SPAWN_GAP_MIN_M, SPAWN_GAP_MAX_M, random);
+}
+
+/** World z of a traffic car spawned ``gap`` units ahead of ``egoZ``. */
+export function trafficSpawnZ(egoZ, gap) {
+  return egoZ - gap;
 }
 
 /** Paint colour of a traffic car. */
@@ -132,10 +225,11 @@ export function canSpawnTraffic(activeCount) {
 
 /**
  * Delay before the ``attempt``-th reconnect, or ``null`` when the budget of
- * attempts is used up. The delay doubles every attempt and saturates.
+ * attempts is used up. The delay doubles every attempt and saturates. Only
+ * whole attempts are accepted, matching the phone side helper.
  */
 export function nextReconnectDelayMs(attempt) {
-  if (attempt < 1 || attempt > MAX_RECONNECT_ATTEMPTS) {
+  if (!Number.isInteger(attempt) || attempt < 1 || attempt > MAX_RECONNECT_ATTEMPTS) {
     return null;
   }
   const delay = RECONNECT_BASE_DELAY_MS * 2 ** (attempt - 1);
@@ -167,41 +261,127 @@ export function normalizeCommand(payload) {
   return command;
 }
 
-/** One longitudinal step of the player car. Returns the speed in m/s. */
-export function stepSpeed(speed, throttle, brake, dt) {
-  // A stationary car without throttle stays stationary.
-  if (speed <= 0 && throttle <= 0) {
-    return 0;
+/**
+ * One longitudinal step of the player car, exactly as the phase-5 brief spells
+ * it out: brake wins over throttle, released pedals leave coasting friction,
+ * and the result is clipped to 0..maxSpeed. Returns the speed in m/s.
+ */
+export function stepLongitudinalSpeed(speed, throttle, brake, dt) {
+  let next;
+  if (brake > 0.1) {
+    next = speed - BRAKE_DECELERATION_MS2 * brake * dt;
+  } else if (throttle > 0.1) {
+    next = speed + ACCELERATION_MS2 * throttle * dt;
+  } else {
+    next = speed - COASTING_FRICTION_MS2 * dt;
   }
-  const drag = ROLLING_DRAG_MS2 * (speed / MAX_SPEED_MS) + COASTING_RESISTANCE_MS2;
-  const acceleration = throttle * ACCELERATION_MS2 - brake * BRAKE_DECELERATION_MS2 - drag;
-  return clamp(speed + acceleration * dt, 0, MAX_SPEED_MS);
+  return clamp(next, 0, MAX_SPEED_MS);
 }
 
-/** One lateral step of the player car. Returns the new x position. */
-export function stepLateralPosition(x, steering, dt) {
-  return clamp(x + steering * STEER_RATE * dt, -EGO_LATERAL_LIMIT, EGO_LATERAL_LIMIT);
+/**
+ * One heading step. The car only yaws while rolling faster than
+ * HEADING_MIN_SPEED_MS, and the steering authority ramps in with speed
+ * (min(1, speed / HEADING_SPEED_REF_MS)) so the car cannot spin on the spot.
+ * Returns the new heading in radians.
+ */
+export function stepHeading(heading, steering, speed, dt) {
+  if (speed <= HEADING_MIN_SPEED_MS) {
+    return heading;
+  }
+  const authority = Math.min(1, speed / HEADING_SPEED_REF_MS);
+  return heading + STEERING_SIGN * steering * STEER_RATE * authority * dt;
 }
 
-/** Convert m/s into km/h. */
-export function speedToKmh(speed) {
-  return speed * 3.6;
+/**
+ * One position step. Forward is -z (the camera looks down -z, so world +x is
+ * the *right* side of the screen): steering positive -> heading positive ->
+ * x increases -> the car turns right on screen, matching DAVE-2.
+ * Returns the new {x, z}.
+ */
+export function stepWorldPosition(x, z, heading, speed, dt) {
+  return {
+    x: x + Math.sin(heading) * speed * dt,
+    z: z - Math.cos(heading) * speed * dt,
+  };
 }
 
-/** Speed frame sent from the scene to the phone. Commands are never included. */
+/** The invisible wall clamps the lateral position to |x| = ROAD_WALL_X. */
+export function clampToWall(x) {
+  return clamp(x, -ROAD_WALL_X, ROAD_WALL_X);
+}
+
+/** Heading in radians, normalised to degrees in the range (-180, 180]. */
+export function headingDegrees(heading) {
+  const deg = (heading * 180) / Math.PI;
+  return deg - 360 * Math.ceil(deg / 360 - 0.5);
+}
+
+/**
+ * Whether the blinker lamps are lit at ``phase``. The phase advances by
+ * BLINKER_PHASE_RATE per second, so the lamp toggles three times a second.
+ */
+export function blinkerIsLit(phase) {
+  return Math.floor(phase) % 2 === 0;
+}
+
+/**
+ * First-person camera pose for an ego car at (x, z) with ``heading``. The
+ * camera sits on the front bumper (CAMERA_BUMPER_M ahead of the centre along
+ * the facing direction) and looks CAMERA_LOOK_AHEAD_M ahead at eye height.
+ * Facing direction for heading h is (sin h, -cos h).
+ */
+export function cameraPose(x, z, heading) {
+  const sinH = Math.sin(heading);
+  const cosH = Math.cos(heading);
+  return {
+    position: {
+      x: x + CAMERA_BUMPER_M * sinH,
+      y: CAMERA_EYE_HEIGHT,
+      z: z - CAMERA_BUMPER_M * cosH,
+    },
+    lookAt: {
+      x: x + CAMERA_LOOK_AHEAD_M * sinH,
+      y: CAMERA_EYE_HEIGHT,
+      z: z - CAMERA_LOOK_AHEAD_M * cosH,
+    },
+  };
+}
+
+/**
+ * Axis-aligned collision test in closed form. The simulation uses the same
+ * expression through THREE.Box3.set(min, max) + intersectsBox — this helper
+ * mirrors it exactly (per axis: a.max >= b.min && a.min <= b.max) so the
+ * Node tests can pin the behaviour without WebGL.
+ */
+export function carsCollide(egoX, egoZ, carX, carZ) {
+  return (
+    Math.abs(egoX - carX) <= CAR_HALF_X + CAR_HALF_X &&
+    Math.abs(egoZ - carZ) <= CAR_HALF_Z + CAR_HALF_Z
+  );
+}
+
+/** Telemetry frame sent from the scene to the phone. Commands are never included. */
 export function telemetryFrame(speedMs) {
   const speedKmh = clamp(Math.round(speedToKmh(speedMs)), 0, 400);
   return { type: "telemetry", speed_kmh: speedKmh };
 }
 
 /**
- * Offset applied to the lane markings so that they appear to scroll with the
- * car. The offset stays inside one dash period, which keeps the pattern
- * seamless and the number small.
+ * Hazard frame sent when the car collides or grinds the wall. The server
+ * relays it to the phone dashboard, where it shows a warning banner; on the
+ * monitor the matching screen flash is visible to the phone camera as well.
+ * Unknown kinds return ``null`` so a typo cannot send garbage.
  */
-export function dashScrollOffset(distance) {
-  const period = DASH_SIZE + DASH_GAP;
-  return ((distance % period) + period) % period;
+export function hazardFrame(kind) {
+  if (!HAZARD_KINDS.includes(kind)) {
+    return null;
+  }
+  return { type: "hazard", hazard: kind };
+}
+
+/** Convert m/s into km/h. */
+export function speedToKmh(speed) {
+  return speed * 3.6;
 }
 
 /** Frame rate smoothed over ``windowSeconds``, in frames per second. */
@@ -222,8 +402,9 @@ const FOG_NEAR = 90;
 const FOG_FAR = 300;
 const GROUND_COLOUR = 0x4a6b3a;
 const LANE_DIVIDER_X = [-2, 2];
-const SCENERY_START_Z = -340;
-const SCENERY_END_Z = 20;
+const SCENERY_SPACING = 22;
+/** Scenery stays within this distance behind the car before it is recycled. */
+const SCENERY_KEEP_BEHIND_M = 25;
 
 function createRenderer(canvas) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -244,13 +425,15 @@ function createScene() {
 
 function createCamera() {
   const camera = new THREE.PerspectiveCamera(
-    60,
+    CAMERA_FOV,
     window.innerWidth / window.innerHeight,
     0.1,
     600,
   );
-  camera.position.set(0, 3, 8);
-  camera.lookAt(0, 0, -20);
+  // The first frame of update() snaps this to the bumper pose.
+  const pose = cameraPose(0, 0, 0);
+  camera.position.set(pose.position.x, pose.position.y, pose.position.z);
+  camera.lookAt(pose.lookAt.x, pose.lookAt.y, pose.lookAt.z);
   return camera;
 }
 
@@ -258,7 +441,6 @@ function createLights(scene) {
   scene.add(new THREE.AmbientLight(0xffffff, 0.55));
 
   const sun = new THREE.DirectionalLight(0xfff4e0, 1.1);
-  sun.position.set(18, 30, 12);
   sun.castShadow = true;
   sun.shadow.mapSize.set(1024, 1024);
   // The shadow volume only has to cover the road around the player car.
@@ -269,10 +451,21 @@ function createLights(scene) {
   sun.shadow.camera.near = 1;
   sun.shadow.camera.far = 130;
   scene.add(sun);
+  // The target is steered to the ego car every frame, so the light direction
+  // stays constant while the shadow frustum follows the endless drive.
+  scene.add(sun.target);
   return sun;
 }
 
-function createRoad(scene) {
+/**
+ * Build every road-fixed object (ground, asphalt, markings, rails) into one
+ * group. Driving towards -z eventually leaves the 400-unit plane behind, so
+ * the simulation snaps the group forward in multiples of the dash period,
+ * where the pattern maps onto itself and the jump is invisible.
+ */
+function createRoadRoot(scene) {
+  const root = new THREE.Group();
+
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(240, ROAD_LENGTH + 60),
     new THREE.MeshStandardMaterial({ color: GROUND_COLOUR, roughness: 1 }),
@@ -280,7 +473,7 @@ function createRoad(scene) {
   ground.rotation.x = -Math.PI / 2;
   ground.position.set(0, -0.02, ROAD_Z_CENTRE);
   ground.receiveShadow = true;
-  scene.add(ground);
+  root.add(ground);
 
   const road = new THREE.Mesh(
     new THREE.PlaneGeometry(ROAD_WIDTH, ROAD_LENGTH),
@@ -289,68 +482,54 @@ function createRoad(scene) {
   road.rotation.x = -Math.PI / 2;
   road.position.set(0, 0, ROAD_Z_CENTRE);
   road.receiveShadow = true;
-  scene.add(road);
-  return road;
-}
+  root.add(road);
 
-function laneLineGeometry() {
-  return new THREE.BufferGeometry().setFromPoints([
+  const lineSpan = new THREE.BufferGeometry().setFromPoints([
     new THREE.Vector3(0, 0.02, ROAD_Z_CENTRE - ROAD_LENGTH / 2),
     new THREE.Vector3(0, 0.02, ROAD_Z_CENTRE + ROAD_LENGTH / 2),
   ]);
-}
 
-/** Dashed lane dividers. Translating them along z makes them scroll. */
-function createLaneLines(scene) {
-  const geometry = laneLineGeometry();
-  const material = new THREE.LineDashedMaterial({
+  const dashMaterial = new THREE.LineDashedMaterial({
     color: 0xffffff,
     dashSize: DASH_SIZE,
     gapSize: DASH_GAP,
   });
-
-  const lines = [];
   for (const x of LANE_DIVIDER_X) {
-    const line = new THREE.Line(geometry, material);
+    const line = new THREE.Line(lineSpan, dashMaterial);
     line.position.x = x;
     line.computeLineDistances();
-    scene.add(line);
-    lines.push(line);
+    root.add(line);
   }
-  return lines;
-}
 
-/** Solid lines at the outer edge of the road. */
-function createEdgeLines(scene) {
-  const geometry = laneLineGeometry();
-  const material = new THREE.LineBasicMaterial({ color: 0xffffff });
+  const edgeMaterial = new THREE.LineBasicMaterial({ color: 0xffffff });
   const halfWidth = ROAD_WIDTH / 2 - 0.5;
   for (const x of [-halfWidth, halfWidth]) {
-    const line = new THREE.Line(geometry, material);
+    const line = new THREE.Line(lineSpan, edgeMaterial);
     line.position.x = x;
-    scene.add(line);
+    root.add(line);
   }
-}
 
-/** Guard rails along both sides of the road. */
-function createGuardRails(scene) {
-  const material = new THREE.MeshStandardMaterial({
+  const railMaterial = new THREE.MeshStandardMaterial({
     color: 0x9e9e9e,
     roughness: 0.5,
     metalness: 0.6,
   });
-  const geometry = new THREE.BoxGeometry(0.2, 0.5, ROAD_LENGTH);
+  const railGeometry = new THREE.BoxGeometry(0.2, 0.5, ROAD_LENGTH);
   for (const x of [-(ROAD_WIDTH / 2 + 0.4), ROAD_WIDTH / 2 + 0.4]) {
-    const rail = new THREE.Mesh(geometry, material);
+    const rail = new THREE.Mesh(railGeometry, railMaterial);
     rail.position.set(x, 0.45, ROAD_Z_CENTRE);
     rail.castShadow = true;
-    scene.add(rail);
+    root.add(rail);
   }
+
+  scene.add(root);
+  return root;
 }
 
 /**
- * Trees and lamp posts beside the road. Every item is recycled when it passes
- * the camera, so scrolling costs nothing but a position update.
+ * Trees and lamp posts beside the road. They are static world objects: when
+ * the car has driven past one by SCENERY_KEEP_BEHIND_M it is moved one span
+ * ahead, so the decoration is endless too.
  */
 function createScenery(scene) {
   const group = new THREE.Group();
@@ -368,10 +547,10 @@ function createScenery(scene) {
     emissiveIntensity: 0.25,
   });
 
-  const span = SCENERY_END_Z - SCENERY_START_Z;
-  const spacing = 22;
+  const span = 360; // scenery window: span behind the car + KEEP_BEHIND ahead
+  const startZ = -span + SCENERY_KEEP_BEHIND_M;
 
-  for (let z = SCENERY_START_Z; z < SCENERY_END_Z; z += spacing) {
+  for (let z = startZ; z < SCENERY_KEEP_BEHIND_M; z += SCENERY_SPACING) {
     for (const side of [-1, 1]) {
       // Trees are jittered so the two rows do not look like a corridor.
       const tree = new THREE.Group();
@@ -385,13 +564,13 @@ function createScenery(scene) {
       tree.position.set(
         side * (14 + Math.abs((z * 7) % 9)),
         0,
-        z + Math.abs((z * 3) % spacing),
+        z + Math.abs((z * 3) % SCENERY_SPACING),
       );
       group.add(tree);
     }
   }
 
-  for (let z = SCENERY_START_Z; z < SCENERY_END_Z; z += spacing * 2) {
+  for (let z = startZ; z < SCENERY_KEEP_BEHIND_M; z += SCENERY_SPACING * 2) {
     for (const side of [-1, 1]) {
       const lamp = new THREE.Group();
       const pole = new THREE.Mesh(poleGeometry, poleMaterial);
@@ -413,6 +592,7 @@ function createScenery(scene) {
 /**
  * Build cars out of boxes and cylinders. Geometries and the shared materials
  * are created once, so a pooled car costs four extra meshes and no GPU upload.
+ * A built car faces -z.
  */
 function createCarFactory() {
   const geometries = {
@@ -470,22 +650,19 @@ function createCarFactory() {
     car.add(cabin);
 
     const windshield = new THREE.Mesh(geometries.glass, glassMaterial);
-    windshield.position.set(0, 1.55, -0.85);
-    windshield.rotation.x = -0.28;
+    windshield.position.set(0, 1.55, -0.55);
     car.add(windshield);
 
-    const rearWindow = new THREE.Mesh(geometries.glass, glassMaterial);
-    rearWindow.position.set(0, 1.55, 1.25);
-    rearWindow.rotation.x = 0.28;
-    car.add(rearWindow);
-
-    for (const side of [-1, 1]) {
-      for (const axle of [-1.3, 1.3]) {
-        const wheel = new THREE.Mesh(geometries.wheel, tyreMaterial);
-        wheel.position.set(side * 0.98, 0.36, axle);
-        wheel.castShadow = true;
-        car.add(wheel);
-      }
+    const wheelGeometry = geometries.wheel;
+    for (const [x, z] of [
+      [-0.85, -1.3],
+      [0.85, -1.3],
+      [-0.85, 1.3],
+      [0.85, 1.3],
+    ]) {
+      const wheel = new THREE.Mesh(wheelGeometry, tyreMaterial);
+      wheel.position.set(x, 0.36, z);
+      car.add(wheel);
     }
 
     for (const side of [-1, 1]) {
@@ -509,30 +686,104 @@ function createCarFactory() {
  * ------------------------------------------------------------------------- */
 
 /**
- * Create the scene, the cars and the state, and drive them from a
- * requestAnimationFrame loop.
+ * Create the scene, the cars and the state, and drive them from the frame
+ * loop: physics, blinkers, traffic, collisions, HUD, render.
+ *
+ * ``hooks.hud`` receives the HUD readouts, ``hooks.onTelemetry`` the periodic
+ * speed frame and ``hooks.onHazard`` every collision/wall event.
  */
-function createSimulation(canvas) {
+function createSimulation(canvas, hooks) {
+  const { hud, onTelemetry, onHazard } = hooks;
+
   const renderer = createRenderer(canvas);
   const scene = createScene();
+  // Blinker lamps are camera children, so the camera must be part of the graph.
   const camera = createCamera();
-  createLights(scene);
-  createRoad(scene);
-  const laneLines = createLaneLines(scene);
-  createEdgeLines(scene);
-  createGuardRails(scene);
+  scene.add(camera);
+  const sun = createLights(scene);
+  const roadRoot = createRoadRoot(scene);
   const scenery = createScenery(scene);
   const { buildCar, bodyMaterial } = createCarFactory();
 
+  /**
+   * The state of the ego car, in the units of the phase-5 brief. The car
+   * drives towards -z; heading is in radians, 0 = straight ahead.
+   */
   const state = {
+    x: 0,
+    z: 0,
     speed: 0, // m/s
-    lateralX: 0,
-    travelled: 0, // used to scroll the lane markings and the scenery
-    controls: { steering: 0, throttle: 0, brake: 0, turn_signal: 0 },
+    heading: 0,
+    time: 0, // simulation clock, seconds
+    turnSignal: 0, // 0 off, 1 left, 2 right
+    blinkerPhase: 0,
+    collisions: 0,
+    wallHits: 0,
+    frozenUntil: 0, // post-collision pause
+    immuneUntil: 0, // no collision checks during the reset window
+    pendingReset: false, // return to the centre lane once the freeze ends
+    lastWallEventAt: -Infinity,
+    controls: { steering: 0, throttle: 0, brake: 0, turn_signal: 0 }, // keyboard
   };
 
+  /** The latest phone command and the simulation time it arrived. */
+  const external = {
+    command: null,
+    at: -Infinity,
+  };
+
+  /**
+   * The ego mesh is the physics body. The camera rides on its front bumper,
+   * so the body itself stays invisible — the driver must not see a hood-less
+   * car floating in front of the lens.
+   */
   const egoCar = buildCar(EGO_COLOUR);
+  egoCar.visible = false;
   scene.add(egoCar);
+
+  /** Reused collision boxes; set() avoids a per-frame allocation. */
+  const egoBox = new THREE.Box3();
+  const trafficBox = new THREE.Box3();
+
+  /** Axis-aligned car box centred at (x, z), padded y range for the 3D test. */
+  function setCarBox(box, x, z) {
+    box.min.set(x - CAR_HALF_X, 0.1, z - CAR_HALF_Z);
+    box.max.set(x + CAR_HALF_X, 1.5, z + CAR_HALF_Z);
+    return box;
+  }
+
+  /**
+   * Two small yellow hood-corner lamps, parented to the camera so they stay
+   * in view: in first person the car body is invisible, and this is how the
+   * 3 Hz blink stays visible to the human *and* to the phone camera.
+   * Each lamp swaps between an "on" and an "off" material.
+   */
+  function createBlinkers() {
+    const geometry = new THREE.BoxGeometry(BLINKER_SIZE.x, BLINKER_SIZE.y, BLINKER_SIZE.z);
+    const onMaterial = new THREE.MeshStandardMaterial({
+      color: BLINKER_ON_COLOUR,
+      emissive: BLINKER_ON_COLOUR,
+      emissiveIntensity: 0.9,
+      roughness: 0.4,
+    });
+    const offMaterial = new THREE.MeshStandardMaterial({
+      color: BLINKER_OFF_COLOUR,
+      roughness: 0.6,
+    });
+    const left = new THREE.Mesh(geometry, offMaterial);
+    left.position.set(-BLINKER_CAMERA_OFFSET.x, BLINKER_CAMERA_OFFSET.y, BLINKER_CAMERA_OFFSET.z);
+    left.userData.signal = 1; // turn_signal class: 1 = left
+    const right = new THREE.Mesh(geometry, offMaterial);
+    right.position.set(BLINKER_CAMERA_OFFSET.x, BLINKER_CAMERA_OFFSET.y, BLINKER_CAMERA_OFFSET.z);
+    right.userData.signal = 2; // turn_signal class: 2 = right
+    camera.add(left, right);
+    return [
+      { mesh: left, onMaterial, offMaterial },
+      { mesh: right, onMaterial, offMaterial },
+    ];
+  }
+
+  const blinkers = createBlinkers();
 
   const traffic = {
     cars: [], // every pooled car, active or not
@@ -558,15 +809,32 @@ function createSimulation(canvas) {
     return car;
   }
 
-  /** Place a traffic car at a random lane, far down the road, moving towards us. */
+  /**
+   * Place a traffic car in a random lane, SPAWN_GAP ahead of the ego car,
+   * driving towards it (+z, so the mesh faces +z via rotation.y = PI).
+   */
   function spawnTrafficCar() {
     const car = acquireTrafficCar();
     if (car === null) {
       return false;
     }
+    const x = pickLane();
+    const z = trafficSpawnZ(state.z, pickSpawnGap());
+    // Do not stack cars on top of each other in the same lane.
+    for (const other of traffic.cars) {
+      if (
+        other !== car &&
+        other.userData.active &&
+        other.position.x === x &&
+        Math.abs(other.position.z - z) < MIN_LANE_GAP_M
+      ) {
+        return false; // car stays inactive; the next timer tick tries again
+      }
+    }
     car.userData.speed = pickTrafficSpeed();
     car.userData.body.material = bodyMaterial(pickTrafficColour());
-    car.position.set(pickLane(), 0, pickSpawnZ());
+    car.position.set(x, 0, z);
+    car.rotation.y = Math.PI;
     car.userData.active = true;
     car.visible = true;
     return true;
@@ -582,8 +850,8 @@ function createSimulation(canvas) {
       if (!car.userData.active) {
         continue;
       }
-      car.position.z += car.userData.speed * dt;
-      if (car.position.z > DESPAWN_Z) {
+      car.position.z += car.userData.speed * dt; // towards the ego car
+      if (car.position.z > state.z + DESPAWN_BEHIND_M) {
         releaseTrafficCar(car);
       }
     }
@@ -595,39 +863,220 @@ function createSimulation(canvas) {
     }
   }
 
-  /** Scroll the markings and the scenery by the distance covered this frame. */
-  function updateScrolling(distance) {
-    const offset = dashScrollOffset(state.travelled);
-    for (const line of laneLines) {
-      line.position.z = offset;
-    }
+  /**
+   * Keep the road under the car: snap the road group to the nearest multiple
+   * of the dash period. Because every marking repeats with that period, the
+   * snap never moves a visible feature.
+   */
+  function updateEndlessRoad() {
+    const period = DASH_SIZE + DASH_GAP;
+    roadRoot.position.z = period * Math.round(state.z / period);
+  }
+
+  /** Recycle scenery that the car has driven past to one span ahead. */
+  function updateScenery() {
     const span = scenery.userData.span;
     for (const item of scenery.children) {
-      item.position.z += distance;
-      if (item.position.z > SCENERY_END_Z) {
+      if (item.position.z > state.z + SCENERY_KEEP_BEHIND_M) {
         item.position.z -= span;
+      } else if (item.position.z < state.z - span + SCENERY_KEEP_BEHIND_M) {
+        item.position.z += span;
       }
     }
   }
 
+  /** Steer the shadow-casting sun (and its target) along with the car. */
+  function updateSun() {
+    sun.position.set(state.x + 18, 30, state.z + 12);
+    sun.target.position.set(state.x, 0, state.z);
+    sun.target.updateMatrixWorld();
+  }
+
+  function updateCamera() {
+    const pose = cameraPose(state.x, state.z, state.heading);
+    camera.position.set(pose.position.x, pose.position.y, pose.position.z);
+    camera.lookAt(pose.lookAt.x, pose.lookAt.y, pose.lookAt.z);
+  }
+
+  /**
+   * Phone commands are authoritative for COMMAND_FRESH_S; afterwards the
+   * keyboard fallback drives again. This keeps manual testing possible while
+   * the closed loop stays uninterrupted at the phone's 20 Hz send rate.
+   */
+  function effectiveControls() {
+    if (external.command !== null && state.time - external.at <= COMMAND_FRESH_S) {
+      return external.command;
+    }
+    return state.controls;
+  }
+
+  /**
+   * Store a validated phone command and switch the turn signal target.
+   * Called by ``window.applyControls`` in the bootstrap.
+   */
+  function receiveCommand(data) {
+    const command = normalizeCommand(data);
+    if (command === null) {
+      return false;
+    }
+    external.command = command;
+    external.at = state.time;
+    updateTurnSignalLights(command.turn_signal);
+    return true;
+  }
+
+  /** Set the signal class the blinker animation follows. */
+  function updateTurnSignalLights(turnSignal) {
+    state.turnSignal = turnSignal;
+  }
+
+  /**
+   * One physics step of the ego car. The order follows the brief: speed,
+   * then heading (it needs the new speed), then position (it needs the new
+   * heading), then the wall, then the mesh. During the post-collision freeze
+   * the car stands still and resets to the centre lane when the freeze ends.
+   */
+  function updateEgoPhysics(dt) {
+    if (state.pendingReset && state.time >= state.frozenUntil) {
+      state.x = 0;
+      state.heading = 0;
+      state.speed = 0;
+      state.pendingReset = false;
+    }
+
+    if (state.time < state.frozenUntil) {
+      syncEgoMesh();
+      return;
+    }
+
+    const { steering, throttle, brake } = effectiveControls();
+
+    state.speed = stepLongitudinalSpeed(state.speed, throttle, brake, dt);
+    state.heading = stepHeading(state.heading, steering, state.speed, dt);
+    const position = stepWorldPosition(state.x, state.z, state.heading, state.speed, dt);
+    state.x = position.x;
+    state.z = position.z;
+
+    // Invisible wall: clamp, scrub speed while grinding, and raise one
+    // wall-hit event (HUD counter + phone hazard) per contact.
+    if (Math.abs(state.x) > ROAD_WALL_X) {
+      state.x = clampToWall(state.x);
+      state.speed = Math.max(0, state.speed - WALL_SCRUB_MS2 * dt);
+      if (state.time - state.lastWallEventAt >= WALL_EVENT_COOLDOWN_S) {
+        state.lastWallEventAt = state.time;
+        state.wallHits += 1;
+        onWallContact();
+      }
+    }
+
+    syncEgoMesh();
+  }
+
+  function syncEgoMesh() {
+    // The mesh faces -z at rotation.y = 0, so facing (sin h, -cos h) needs
+    // rotation.y = -heading.
+    egoCar.position.set(state.x, 0, state.z);
+    egoCar.rotation.y = -state.heading;
+  }
+
+  /**
+   * Toggle the hood-corner lamps: the phase advances 3 per second and the
+   * colour flips on every integer step — the spec blink at "3 Hz".
+   */
+  function animateBlinkers(dt) {
+    state.blinkerPhase += dt * BLINKER_PHASE_RATE;
+    const lit = blinkerIsLit(state.blinkerPhase);
+    for (const blinker of blinkers) {
+      const active = state.turnSignal === blinker.mesh.userData.signal;
+      blinker.mesh.material = active && lit ? blinker.onMaterial : blinker.offMaterial;
+    }
+  }
+
+  /** Collision with traffic: stop, flash, count, warn, freeze, then reset. */
+  function onCollision() {
+    state.collisions += 1;
+    state.speed = 0;
+    state.frozenUntil = state.time + COLLISION_FREEZE_S;
+    state.immuneUntil = state.frozenUntil + COLLISION_IMMUNITY_S;
+    state.pendingReset = true;
+    // A crash also mutes wall events for a moment, so the two flashes and
+    // messages do not fire on top of each other.
+    state.lastWallEventAt = state.time;
+    hud.flash("collision");
+    onHazard("collision");
+  }
+
+  /** Grinding the wall: orange flash, count, and a warning to the phone. */
+  function onWallContact() {
+    hud.flash("wall");
+    onHazard("wall");
+  }
+
+  /**
+   * Box test between the ego car and every nearby traffic car. The broad
+   * phase keeps the per-frame cost at a couple of comparisons; the Box3 test
+   * itself is the exact expression mirrored by the pure ``carsCollide``.
+   */
+  function checkCollision() {
+    if (state.time < state.immuneUntil || state.time < state.frozenUntil) {
+      return;
+    }
+    setCarBox(egoBox, state.x, state.z);
+    for (const car of traffic.cars) {
+      if (!car.userData.active) {
+        continue;
+      }
+      if (Math.abs(car.position.x - state.x) > COLLISION_BROAD_X) {
+        continue;
+      }
+      if (Math.abs(car.position.z - state.z) > COLLISION_BROAD_Z) {
+        continue;
+      }
+      if (
+        egoBox.intersectsBox(setCarBox(trafficBox, car.position.x, car.position.z))
+      ) {
+        onCollision();
+        return;
+      }
+    }
+  }
+
+  let frameRate = 60;
+  let hudTimer = 0;
+
+  /** Numbers are refreshed at 4 Hz; the blinking arrows run every frame. */
+  function updateHud(dt) {
+    hud.setTurnSignal(
+      state.turnSignal === 1 && blinkerIsLit(state.blinkerPhase),
+      state.turnSignal === 2 && blinkerIsLit(state.blinkerPhase),
+    );
+
+    hudTimer += dt;
+    if (hudTimer < 0.25) {
+      return;
+    }
+    hudTimer = 0;
+    hud.setSpeed(state.speed);
+    hud.setHeading(headingDegrees(state.heading));
+    hud.setCollisionCount(state.collisions);
+    hud.setWallCount(state.wallHits);
+    hud.setFrameRate(frameRate);
+    onTelemetry(state.speed);
+  }
+
   function update(dt) {
-    const { steering, throttle, brake } = state.controls;
+    state.time += dt;
+    frameRate = smoothFrameRate(frameRate, dt);
 
-    state.speed = stepSpeed(state.speed, throttle, brake, dt);
-    state.lateralX = stepLateralPosition(state.lateralX, steering, dt);
-    state.travelled += state.speed * dt;
-
-    egoCar.position.x = state.lateralX;
-    // A slight roll and yaw make the steering readable on screen.
-    egoCar.rotation.z = -steering * 0.06;
-    egoCar.rotation.y = -steering * 0.08;
-
+    updateEgoPhysics(dt);
+    animateBlinkers(dt);
     updateTraffic(dt);
-    updateScrolling(state.speed * dt);
-
-    // The camera follows the car laterally instead of snapping to it.
-    camera.position.x += (state.lateralX - camera.position.x) * clamp(dt * 4, 0, 1);
-    camera.lookAt(state.lateralX * 0.6, 1, -20);
+    updateEndlessRoad();
+    updateScenery();
+    updateSun();
+    updateCamera();
+    checkCollision();
+    updateHud(dt);
 
     renderer.render(scene, camera);
   }
@@ -643,6 +1092,10 @@ function createSimulation(canvas) {
     traffic,
     update,
     resize,
+    receiveCommand,
+    setKeyboardControls(controls) {
+      state.controls = controls;
+    },
     spawnTrafficCar,
     scene,
     camera,
@@ -654,18 +1107,17 @@ function createSimulation(canvas) {
  * 5. Browser bootstrap
  * ------------------------------------------------------------------------- */
 
-/**
- * Placeholder for phase 5. The renderer receives validated commands here and
- * only logs them for now; the driving model is applied in phase 5.
- */
-function applyControls(data) {
-  console.log("[Controls]", data);
-}
-
 function createHud() {
   const status = document.getElementById("ws-status");
   const speed = document.getElementById("speed-value");
   const frameRate = document.getElementById("fps-value");
+  const heading = document.getElementById("heading-value");
+  const collisionCount = document.getElementById("collision-count");
+  const wallCount = document.getElementById("wall-count");
+  const turnLeft = document.getElementById("turn-left");
+  const turnRight = document.getElementById("turn-right");
+  const flash = document.getElementById("hazard-flash");
+  const flashText = document.getElementById("hazard-flash-text");
 
   return {
     setStatus(text, state) {
@@ -677,6 +1129,35 @@ function createHud() {
     },
     setFrameRate(value) {
       frameRate.textContent = String(Math.round(value));
+    },
+    setHeading(degrees) {
+      heading.textContent = `${degrees > 0 ? "+" : ""}${Math.round(degrees)}°`;
+    },
+    setCollisionCount(count) {
+      collisionCount.textContent = String(count);
+      collisionCount.classList.toggle("is-hot", count > 0);
+    },
+    setWallCount(count) {
+      wallCount.textContent = String(count);
+      wallCount.classList.toggle("is-hot", count > 0);
+    },
+    /** Blinking arrows follow the exact lamp phase in the 3D scene. */
+    setTurnSignal(leftLit, rightLit) {
+      turnLeft.classList.toggle("is-lit", leftLit);
+      turnRight.classList.toggle("is-lit", rightLit);
+    },
+    /**
+     * Full-screen flash. Red for a collision, orange for the wall; the CSS
+     * animation removes itself, and the text tells the phone camera (and the
+     * human) what happened.
+     */
+    flash(kind) {
+      const isCollision = kind === "collision";
+      flashText.textContent = isCollision ? "برخورد!" : "برخورد با دیوار — مسیر را عوض کن";
+      flash.classList.remove("is-collision", "is-wall", "is-running");
+      // Force a reflow so restarting the animation works on consecutive hits.
+      void flash.offsetWidth;
+      flash.classList.add(isCollision ? "is-collision" : "is-wall", "is-running");
     },
   };
 }
@@ -780,15 +1261,29 @@ function connectRenderSocket(hud) {
   connect();
   return {
     sendTelemetry(speedMs) {
-      if (socket?.readyState !== WebSocket.OPEN || socket.bufferedAmount > 1024) return false;
-      try {
-        socket.send(JSON.stringify(telemetryFrame(speedMs)));
-        return true;
-      } catch {
+      return sendFrame(telemetryFrame(speedMs));
+    },
+    sendHazard(kind) {
+      const frame = hazardFrame(kind);
+      if (frame === null) {
         return false;
       }
+      return sendFrame(frame);
     },
   };
+
+  /** One guarded socket write; a closed or congested socket drops the frame. */
+  function sendFrame(frame) {
+    if (socket?.readyState !== WebSocket.OPEN || socket.bufferedAmount > 1024) {
+      return false;
+    }
+    try {
+      socket.send(JSON.stringify(frame));
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }
 
 function boot() {
@@ -797,38 +1292,38 @@ function boot() {
 
   let simulation;
   try {
-    simulation = createSimulation(canvas);
+    simulation = createSimulation(canvas, {
+      hud,
+      onTelemetry: (speedMs) => renderLink.sendTelemetry(speedMs),
+      onHazard: (kind) => renderLink.sendHazard(kind),
+    });
   } catch (error) {
     console.error("[Scene] could not create the WebGL renderer", error);
     hud.setStatus("WebGL در دسترس نیست", "disconnected");
     return;
   }
 
-  // Keyboard commands drive the phase 2 scene directly. In phase 5 the
-  // WebSocket commands reach the same state through applyControls.
+  // The keyboard drives the car whenever no fresh phone command arrives, so
+  // the scene stays testable without a phone on the dashboard.
   createKeyboardControls()((controls) => {
-    simulation.state.controls = controls;
+    simulation.setKeyboardControls(controls);
   });
+
+  // The phase-5 entry point: every validated command from the phone lands
+  // here, before any physics step reads it.
+  window.applyControls = (data) => {
+    simulation.receiveCommand(data);
+  };
 
   window.addEventListener("resize", simulation.resize);
 
   const clock = new THREE.Clock();
-  let frameRate = 60;
-  let hudTimer = 0;
   const renderLink = connectRenderSocket(hud);
 
   function loop() {
-    const dt = Math.min(clock.getDelta(), 0.1); // ignore tab switch pauses
+    // Ignore the tab-switch pause; everything else runs on real delta time.
+    const dt = Math.min(clock.getDelta(), 0.1);
     simulation.update(dt);
-
-    frameRate = smoothFrameRate(frameRate, dt);
-    hudTimer += dt;
-    if (hudTimer >= 0.25) {
-      hud.setSpeed(simulation.state.speed);
-      hud.setFrameRate(frameRate);
-      renderLink.sendTelemetry(simulation.state.speed);
-      hudTimer = 0;
-    }
     requestAnimationFrame(loop);
   }
 
@@ -838,8 +1333,6 @@ function boot() {
 // Expose the phase 5 entry point before any command can arrive. Guarded so the
 // module stays importable outside a browser, for the Node tests.
 if (typeof window !== "undefined") {
-  window.applyControls = applyControls;
-
   if (typeof document !== "undefined" && document.getElementById("scene-canvas") !== null) {
     boot();
   }

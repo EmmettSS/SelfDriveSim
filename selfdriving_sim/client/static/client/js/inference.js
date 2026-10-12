@@ -14,6 +14,8 @@
 import { withResetAfterGRU } from "./reset-after-gru.js";
 
 export const SEND_INTERVAL_MS = 50;
+/** How long the hazard warning banner stays on the dashboard. */
+export const HAZARD_BANNER_MS = 4000;
 /** Model input: SEQUENCE_LENGTH consecutive RGB frames of 160 × 120. */
 export const FRAME_WIDTH = 160;
 export const FRAME_HEIGHT = 120;
@@ -62,6 +64,23 @@ export function applyTelemetry(payload) {
   const value = payload.speed_kmh;
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
   return Math.max(0, Math.round(value));
+}
+
+/** Persian warning the dashboard shows for each hazard kind. */
+export const HAZARD_MESSAGES = Object.freeze({
+  collision: "⚠ برخورد! خودرو به لاین وسط برمی‌گردد",
+  wall: "⚠ برخورد با دیوار — مسیر را عوض کن",
+});
+
+/**
+ * Extract a validated hazard kind from a server frame, or null. The scene
+ * raises these on a traffic collision and on grinding the invisible wall, so
+ * the dashboard can warn the driving model to change its path.
+ */
+export function parseHazard(payload) {
+  if (payload === null || typeof payload !== "object" || payload.type !== "hazard") return null;
+  const kind = payload.hazard;
+  return typeof kind === "string" && kind in HAZARD_MESSAGES ? kind : null;
 }
 
 export function cameraErrorMessage(error) {
@@ -254,7 +273,7 @@ const ELEMENT_IDS = [
   "status-message", "indicator-left", "indicator-right", "indicator-throttle",
   "indicator-brake", "throttle-value", "brake-value", "throttle-fill", "brake-fill",
   "throttle-meter", "brake-meter", "steering-wheel", "steering-value", "packet-count",
-  "mode-badge",
+  "mode-badge", "hazard-banner", "hazard-banner-text",
 ];
 
 /**
@@ -352,6 +371,29 @@ export class DashboardController {
   clearSpeed() {
     this.setText("speed-value", "—");
     this.ui["speed-value"].setAttribute("aria-label", "سرعت هنوز دریافت نمی‌شود");
+  }
+
+  /**
+   * Show the hazard banner the simulator raises on a collision or a wall
+   * grind. The banner hides itself after HAZARD_BANNER_MS; overlapping
+   * hazards restart the timer instead of stacking.
+   */
+  showHazard(kind) {
+    const message = HAZARD_MESSAGES[kind];
+    if (message === undefined) return;
+    this.setText("hazard-banner-text", message);
+    this.ui["hazard-banner"].classList.add("is-visible");
+    this.window.clearTimeout(this.hazardTimer);
+    this.hazardTimer = this.window.setTimeout(() => {
+      this.hazardTimer = null;
+      this.ui["hazard-banner"].classList.remove("is-visible");
+    }, HAZARD_BANNER_MS);
+  }
+
+  hideHazard() {
+    this.window.clearTimeout(this.hazardTimer);
+    this.hazardTimer = null;
+    this.ui["hazard-banner"].classList.remove("is-visible");
   }
 
   setSocketStatus(text, color) {
@@ -602,6 +644,8 @@ export class DashboardController {
         }
         const speed = applyTelemetry(reply);
         if (speed !== null) this.setSpeed(speed);
+        const hazard = parseHazard(reply);
+        if (hazard !== null) this.showHazard(hazard);
       } catch {
         // Unknown/non-JSON server frames are not driving commands.
       }
@@ -813,6 +857,7 @@ export class DashboardController {
 
   suspend() {
     this.suspended = true;
+    this.hideHazard();
     this.stopInferenceLoop("صفحه غیرفعال شد؛ برای ادامه پس از بازگشت، دوباره شروع را بزنید.");
     this.disconnectControlWebSocket();
     this.releaseCamera();

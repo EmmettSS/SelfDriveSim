@@ -10,9 +10,15 @@ Message flow::
           --group_send(simulation_render, telemetry.update)-->
     phone <--/ws/control/-- ControlConsumer
 
+    browser --/ws/render/--> RenderConsumer
+          --group_send(simulation_render, hazard.update)-->
+    phone <--/ws/control/-- ControlConsumer
+
 Control frames are validated and clipped on the server before they are
 broadcast, so the renderer can rely on the values it receives. Telemetry
-is a speed readout only; it does not apply driving commands.
+is a speed readout only; it does not apply driving commands. Hazard frames
+(collision, wall grind) are relayed to the phone so the driving model's
+dashboard can warn it to change its path.
 """
 
 import json
@@ -36,6 +42,10 @@ COMMAND_FIELDS = ("steering", "throttle", "brake", "turn_signal")
 
 # Inclusive km/h range reported by the Three.js scene to the phone HUD.
 SPEED_KMH_RANGE = (0.0, 400.0)
+
+# Hazards the renderer may report, mirrored by the client side allow-list in
+# scene.js. "collision" = hit traffic, "wall" = ground along the invisible wall.
+HAZARD_KINDS = ("collision", "wall")
 
 
 class CommandValidationError(ValueError):
@@ -101,6 +111,32 @@ def sanitize_telemetry(payload: Any) -> dict[str, float]:
     return {"speed_kmh": speed}
 
 
+def sanitize_hazard(payload: Any) -> dict[str, str]:
+    """Validate a renderer hazard frame and keep only known hazard kinds.
+
+    Args:
+        payload: The decoded JSON value received from the Three.js page.
+
+    Returns:
+        A dict with ``type`` and ``hazard`` keys, where ``hazard`` is one of
+        ``HAZARD_KINDS``.
+
+    Raises:
+        CommandValidationError: If the payload is not an object, does not set
+            ``type`` to ``"hazard"``, or names an unknown hazard.
+    """
+    if not isinstance(payload, dict):
+        raise CommandValidationError("payload must be a JSON object")
+    if payload.get("type") != "hazard":
+        raise CommandValidationError("hazard frames must set type to 'hazard'")
+    hazard = payload.get("hazard")
+    if hazard not in HAZARD_KINDS:
+        raise CommandValidationError(
+            f"'hazard' must be one of: {', '.join(HAZARD_KINDS)}"
+        )
+    return {"type": "hazard", "hazard": hazard}
+
+
 class ControlConsumer(AsyncJsonWebsocketConsumer):
     """Receives driving commands from the phone and broadcasts them to renderers."""
 
@@ -157,6 +193,11 @@ class ControlConsumer(AsyncJsonWebsocketConsumer):
         """Forward the scene speed to the phone. Commands are never included."""
         await self.send_json({"type": "telemetry", "speed_kmh": event["speed_kmh"]})
 
+    async def hazard_update(self, event):
+        """Forward a collision/wall hazard to the phone dashboard."""
+        logger.info("Hazard relayed to /ws/control/: %s", event["hazard"])
+        await self.send_json({"type": "hazard", "hazard": event["hazard"]})
+
     async def _reject(self, message):
         """Tell the sender why a frame was refused. Nothing is broadcast."""
         logger.debug("Rejected control frame: %s", message)
@@ -193,6 +234,16 @@ class RenderConsumer(AsyncJsonWebsocketConsumer):
         await self.receive_json(content)
 
     async def receive_json(self, content, **kwargs):
+        """Dispatch renderer frames by ``type``: telemetry or hazard.
+
+        Anything else gets an error reply, so a scene bug shows up in the
+        renderer console instead of disappearing silently.
+        """
+        frame_type = content.get("type") if isinstance(content, dict) else None
+        if frame_type == "hazard":
+            await self._receive_hazard(content)
+            return
+
         try:
             telemetry = sanitize_telemetry(content)
         except CommandValidationError as exc:
@@ -203,8 +254,23 @@ class RenderConsumer(AsyncJsonWebsocketConsumer):
             {"type": "telemetry.update", "speed_kmh": telemetry["speed_kmh"]},
         )
 
+    async def _receive_hazard(self, content):
+        """Validate a hazard frame and broadcast it to the shared group."""
+        try:
+            hazard = sanitize_hazard(content)
+        except CommandValidationError as exc:
+            await self._reject(str(exc))
+            return
+        await self.channel_layer.group_send(
+            RENDER_GROUP,
+            {"type": "hazard.update", "hazard": hazard["hazard"]},
+        )
+
     async def telemetry_update(self, event):
         """Drop telemetry echoes so the scene does not receive its own speed."""
+
+    async def hazard_update(self, event):
+        """Drop hazard echoes; the hazard has already been shown on the scene."""
 
     async def _reject(self, message):
         logger.debug("Rejected render frame: %s", message)
