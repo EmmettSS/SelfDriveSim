@@ -23,7 +23,7 @@ def test_dashboard_page_is_rtl_and_has_camera_markup(client):
     assert '<html lang="fa" dir="rtl">' in html
     assert "user-scalable=no" in html
     assert '<video id="camera-feed" autoplay muted playsinline' in html
-    assert '<canvas id="process-canvas" width="200" height="66" hidden' in html
+    assert '<canvas id="process-canvas" width="160" height="120" hidden' in html
     assert 'id="hud-bottom" class="driving-instruments" dir="ltr"' in html
 
 
@@ -37,6 +37,7 @@ def test_dashboard_has_all_controls_and_truthful_telemetry_labels(client):
         "btn-reconnect", "status-message", "packet-count",
     ):
         assert f'id="{element_id}"' in html
+    assert 'id="mode-badge"' in html
     assert "MOCK MODE" in html
     assert "خودروی شبیه‌ساز" in html
     assert "شروع خودران" in html
@@ -50,17 +51,27 @@ def test_initial_controls_are_disabled(client):
         assert "disabled" in tag
 
 
+def test_dashboard_loads_the_vendored_model_runtime_before_the_app(client):
+    html = client.get("/dashboard/").content.decode()
+    runtime = html.index('src="/static/client/js/vendor/tf.min.js"')
+    app = html.index('src="/static/client/js/inference.js"')
+    assert runtime < app
+    assert 'type="module"' in html
+    assert 'data-model-url="/static/client/models/dave2/model.json"' in html
+
+
 def test_dashboard_needs_no_remote_cdn(client):
     html = client.get("/dashboard/").content.decode()
     assert 'type="module"' in html
-    for asset in ("css/dashboard.css", "js/inference.js", "fonts/Vazirmatn.woff2"):
+    for asset in ("css/dashboard.css", "js/inference.js", "js/vendor/tf.min.js", "fonts/Vazirmatn.woff2"):
         assert f"/static/client/{asset}" in html
     assert 'src="https://' not in html
     assert 'href="https://' not in html
 
 
 @pytest.mark.parametrize("asset", [
-    "css/dashboard.css", "js/inference.js", "fonts/Vazirmatn.woff2", "fonts/OFL.txt",
+    "css/dashboard.css", "js/inference.js", "js/reset-after-gru.js", "js/vendor/tf.min.js",
+    "js/vendor/README.md", "fonts/Vazirmatn.woff2", "fonts/OFL.txt",
 ])
 def test_dashboard_static_assets_exist(asset):
     path = finders.find(f"client/{asset}")

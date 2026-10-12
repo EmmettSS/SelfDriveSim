@@ -11,7 +11,7 @@ def test_health_endpoint_reports_the_current_phase(client):
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok", "phase": PHASE}
-    assert PHASE == 3
+    assert PHASE == 4
 
 
 def test_root_path_is_named_index():

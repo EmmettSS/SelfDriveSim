@@ -20,7 +20,7 @@ db.sqlite3
 # collectstatic output
 staticfiles/
 
-# Model artefacts (large binaries, see models/README.md)
+# Model artefacts (large binaries, see models/README.md). The converted
+# TensorFlow.js model in client/static/client/models/dave2/ is committed on purpose.
 *.h5
 models/data/
-client/static/client/models/dave2/

@@ -4,8 +4,6 @@ import test from "node:test";
 
 import {
   CONNECT_TIMEOUT_MS,
-  DashboardController,
-  applyTelemetry,
   FRAME_HEIGHT,
   FRAME_WIDTH,
   MAX_BUFFERED_BYTES,
@@ -13,136 +11,13 @@ import {
   SEND_INTERVAL_MS,
   STOP_COMMAND,
   SendRateCounter,
+  applyTelemetry,
   cameraErrorMessage,
   controlSocketUrl,
   mockInference,
   nextReconnectDelayMs,
 } from "../../static/client/js/inference.js";
-
-class FakeClock {
-  now = 0;
-  nextId = 0;
-  tasks = new Map();
-  add(fn, delay, repeat = false) {
-    const id = ++this.nextId;
-    this.tasks.set(id, { fn, delay, repeat, at: this.now + delay });
-    return id;
-  }
-  clear(id) { this.tasks.delete(id); }
-  advance(ms) {
-    const target = this.now + ms;
-    while (true) {
-      const next = [...this.tasks.entries()].sort((a, b) => a[1].at - b[1].at)[0];
-      if (!next || next[1].at > target) break;
-      const [id, task] = next;
-      this.now = task.at;
-      if (task.repeat) task.at += task.delay;
-      else this.tasks.delete(id);
-      task.fn();
-    }
-    this.now = target;
-  }
-  intervals() { return [...this.tasks.values()].filter((task) => task.repeat); }
-}
-
-class FakeClassList {
-  names = new Set();
-  add(name) { this.names.add(name); }
-  remove(name) { this.names.delete(name); }
-  contains(name) { return this.names.has(name); }
-  toggle(name, on = !this.contains(name)) {
-    if (on) this.add(name);
-    else this.remove(name);
-    return on;
-  }
-}
-
-class FakeElement extends EventTarget {
-  textContent = "";
-  disabled = false;
-  hidden = false;
-  srcObject = null;
-  readyState = 4;
-  videoWidth = 1280;
-  videoHeight = 720;
-  classList = new FakeClassList();
-  attributes = {};
-  draws = [];
-  style = { setProperty(name, value) { this[name] = value; } };
-  getContext() { return { drawImage: (...args) => this.draws.push(args) }; }
-  setAttribute(name, value) { this.attributes[name] = value; }
-  async play() {}
-  pause() {}
-}
-
-class FakeDocument extends EventTarget {
-  hidden = false;
-  elements = new Map();
-  getElementById(id) {
-    if (!this.elements.has(id)) this.elements.set(id, new FakeElement());
-    return this.elements.get(id);
-  }
-}
-
-class FakeTrack extends EventTarget {
-  stopped = false;
-  stop() { this.stopped = true; }
-}
-
-class FakeStream {
-  tracks = [new FakeTrack()];
-  getTracks() { return this.tracks; }
-  getVideoTracks() { return this.tracks; }
-}
-
-class FakeSocket {
-  readyState = 0;
-  bufferedAmount = 0;
-  sent = [];
-  failSend = false;
-  constructor(url) { this.url = url; }
-  open() { this.readyState = 1; this.onopen?.(); }
-  close(code = 1000) { this.readyState = 3; this.closeCode = code; this.onclose?.({ code }); }
-  send(data) {
-    if (this.failSend || this.readyState !== 1) throw new Error("socket unavailable");
-    this.sent.push(JSON.parse(data));
-  }
-  message(data) { this.onmessage?.({ data }); }
-}
-
-function harness({ secure = true, getUserMedia } = {}) {
-  const clock = new FakeClock();
-  const document = new FakeDocument();
-  const window = new EventTarget();
-  const sockets = [];
-  const mediaCalls = [];
-  const stream = new FakeStream();
-  Object.assign(window, {
-    isSecureContext: secure,
-    performance: { now: () => clock.now },
-    location: { protocol: "https:", host: "sim.ngrok-free.app" },
-    navigator: { mediaDevices: { getUserMedia: async (constraints) => {
-      mediaCalls.push(constraints);
-      return getUserMedia ? getUserMedia(constraints) : stream;
-    } } },
-    WebSocket: class extends FakeSocket {
-      constructor(url) { super(url); sockets.push(this); }
-    },
-    setInterval: (fn, ms) => clock.add(fn, ms, true),
-    clearInterval: (id) => clock.clear(id),
-    setTimeout: (fn, ms) => clock.add(fn, ms),
-    clearTimeout: (id) => clock.clear(id),
-  });
-  const controller = new DashboardController({ window, document });
-  return { controller, window, document, clock, sockets, mediaCalls, stream, ui: controller.ui };
-}
-
-async function connected(options) {
-  const h = harness(options);
-  assert.equal(await h.controller.init(), true);
-  h.sockets[0].open();
-  return h;
-}
+import { FakeStream, connected, harness } from "./harness.mjs";
 
 test("Mock signals stay within the four-field protocol over a full minute", () => {
   for (let tick = 0; tick < 1200; tick += 1) {
@@ -283,13 +158,15 @@ test("a failed video.play releases every acquired camera track", async () => {
   assert.equal(h.sockets.length, 0);
 });
 
-test("captureFrame waits for video data and draws exactly 200 × 66", async () => {
+test("captureFrame waits for video data and draws exactly 160 × 120", async () => {
   const h = await connected();
   h.ui["camera-feed"].readyState = 1;
   assert.equal(h.controller.captureFrame(), false);
   h.ui["camera-feed"].readyState = 4;
   assert.equal(h.controller.captureFrame(), true);
-  assert.deepEqual(h.ui["process-canvas"].draws[0], [h.ui["camera-feed"], 0, 0, FRAME_WIDTH, FRAME_HEIGHT]);
+  assert.deepEqual(h.ui["process-canvas"].draws[0], [h.ui["camera-feed"], 0, 0, 160, 120]);
+  assert.equal(FRAME_WIDTH, 160);
+  assert.equal(FRAME_HEIGHT, 120);
 });
 
 test("Start is guarded, idempotent and schedules exactly one 50 ms loop", async () => {

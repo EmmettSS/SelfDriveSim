@@ -1,9 +1,34 @@
 import { expect, test } from "@playwright/test";
 
+// Start stays disabled until the model has loaded or has fallen back to Mock, so the
+// first wait covers the model download and the first shader compilation.
 async function ready(page) {
   await page.goto("/dashboard/");
   await expect(page.locator("#ws-status")).toHaveClass(/green/);
-  await expect(page.locator("#btn-start")).toBeEnabled();
+  await expect(page.locator("#btn-start")).toBeEnabled({ timeout: 60000 });
+}
+
+async function openRenderSocket(page) {
+  await page.evaluate(() => new Promise((resolve, reject) => {
+    const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+    window.renderFrames = [];
+    window.renderSocket = new WebSocket(`${scheme}//${location.host}/ws/render/`);
+    window.renderSocket.onopen = resolve;
+    window.renderSocket.onerror = reject;
+    window.renderSocket.onmessage = (event) => window.renderFrames.push(JSON.parse(event.data));
+  }));
+}
+
+function expectProtocolFrame(frame) {
+  expect(Object.keys(frame).sort()).toEqual(["brake", "steering", "throttle", "turn_signal", "type"]);
+  expect(frame.type).toBe("control_update");
+  expect(frame.steering).toBeGreaterThanOrEqual(-1);
+  expect(frame.steering).toBeLessThanOrEqual(1);
+  expect(frame.throttle).toBeGreaterThanOrEqual(0);
+  expect(frame.throttle).toBeLessThanOrEqual(1);
+  expect(frame.brake).toBeGreaterThanOrEqual(0);
+  expect(frame.brake).toBeLessThanOrEqual(1);
+  expect([0, 1, 2]).toContain(frame.turn_signal);
 }
 
 test("camera, local font/styles and socket initialise without sending early", async ({ page }) => {
@@ -32,16 +57,37 @@ test("camera, local font/styles and socket initialise without sending early", as
   expect(pageErrors).toEqual([]);
 });
 
-test("20 Hz Mock controls traverse Django and Redis to the render socket, then stop", async ({ page }) => {
+test("DAVE-2-GRU loads on the phone and its outputs drive the control stream", async ({ page }) => {
+  const logs = [];
+  page.on("console", (message) => logs.push(message.text()));
+  await page.goto("/dashboard/");
+  await expect(page.locator("#mode-badge")).toHaveText("DAVE-2 GRU", { timeout: 60000 });
+  await expect(page.locator("#btn-start")).toBeEnabled({ timeout: 60000 });
+  await expect.poll(() => logs.some((line) => line.includes("[Model] Loaded"))).toBe(true);
+  await openRenderSocket(page);
+  await page.locator("#btn-start").click();
+  await expect(page.locator("#run-status")).toHaveText("در حال ارسال · DAVE-2-GRU");
+  await expect.poll(async () => Number(await page.locator("#packet-count").textContent()), { timeout: 30000 })
+    .toBeGreaterThan(20);
+  const frames = await page.evaluate(() => window.renderFrames);
+  expect(frames.length).toBeGreaterThan(20);
+  frames.forEach(expectProtocolFrame);
+  await page.locator("#btn-stop").click();
+  await expect(page.locator("#btn-stop")).toBeDisabled();
+  await expect.poll(() => page.evaluate(() => window.renderFrames.at(-1))).toEqual({
+    type: "control_update", steering: 0, throttle: 0, brake: 1, turn_signal: 0,
+  });
+  await page.evaluate(() => window.renderSocket.close());
+});
+
+test("when the model cannot be fetched the dashboard falls back to 20 Hz Mock controls", async ({ page }) => {
+  const logs = [];
+  page.on("console", (message) => logs.push(message.text()));
+  await page.route("**/client/models/dave2/model.json", (route) => route.abort());
   await ready(page);
-  await page.evaluate(() => new Promise((resolve, reject) => {
-    const scheme = location.protocol === "https:" ? "wss:" : "ws:";
-    window.renderFrames = [];
-    window.renderSocket = new WebSocket(`${scheme}//${location.host}/ws/render/`);
-    window.renderSocket.onopen = resolve;
-    window.renderSocket.onerror = reject;
-    window.renderSocket.onmessage = (event) => window.renderFrames.push(JSON.parse(event.data));
-  }));
+  await expect(page.locator("#mode-badge")).toHaveText("MOCK MODE");
+  await expect.poll(() => logs.some((line) => line.includes("[Model] Load failed; using Mock"))).toBe(true);
+  await openRenderSocket(page);
   await page.locator("#btn-start").click();
   await expect.poll(async () => Number(await page.locator("#fps-value").textContent())).toBeGreaterThanOrEqual(17);
   await expect(page.locator("#indicator-throttle")).toHaveClass(/active/);
@@ -53,22 +99,16 @@ test("20 Hz Mock controls traverse Django and Redis to the render socket, then s
   const frames = await page.evaluate(() => window.renderFrames);
   expect(frames.length).toBeGreaterThan(45);
   for (const frame of frames) {
-    expect(Object.keys(frame).sort()).toEqual(["brake", "steering", "throttle", "turn_signal", "type"]);
-    expect(frame.type).toBe("control_update");
-    expect(frame.steering).toBeGreaterThanOrEqual(-1);
-    expect(frame.steering).toBeLessThanOrEqual(1);
-    expect(frame.throttle).toBeGreaterThanOrEqual(0);
-    expect(frame.throttle).toBeLessThanOrEqual(1);
+    expectProtocolFrame(frame);
     expect(frame.brake).toBe(0);
-    expect([0, 1, 2]).toContain(frame.turn_signal);
   }
   const capture = await page.locator("#process-canvas").evaluate((canvas) => ({
     width: canvas.width,
     height: canvas.height,
     hidden: canvas.hidden,
-    pixels: canvas.getContext("2d").getImageData(0, 0, 200, 66).data.some((n, i) => i % 4 !== 3 && n > 0),
+    pixels: canvas.getContext("2d").getImageData(0, 0, 160, 120).data.some((n, i) => i % 4 !== 3 && n > 0),
   }));
-  expect(capture).toEqual({ width: 200, height: 66, hidden: true, pixels: true });
+  expect(capture).toEqual({ width: 160, height: 120, hidden: true, pixels: true });
   await page.locator("#btn-stop").click();
   await expect(page.locator("#fps-value")).toHaveText("0");
   await expect(page.locator("#brake-value")).toHaveText("100%");

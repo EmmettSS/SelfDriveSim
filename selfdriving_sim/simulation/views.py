@@ -5,7 +5,7 @@ from django.views.decorators.http import require_safe
 from django.views.generic import TemplateView
 
 # Development phase reported by the health endpoint.
-PHASE = 3
+PHASE = 4
 
 
 class SimulatorView(TemplateView):
