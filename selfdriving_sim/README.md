@@ -6,6 +6,8 @@ This README covers phases 1–4: the Django/Channels server, the Three.js scene 
 
 **[راهنمای فارسی فاز ۴: مدل DAVE-2-GRU، دانلود، تبدیل و چک‌لیست پذیرش](docs/phase-4-model.md)**
 
+**[راهنمای فارسی فاز ۵: اعمال فرمان‌ها در شبیه‌ساز، تست حلقه‌بسته و چک‌لیست پذیرش](docs/phase-5-closed-loop.md)**
+
 **[راهنمای فارسی فاز ۳: اندروید، ngrok، داشبورد و چک‌لیست تست](docs/phase-3-mobile.md)**
 
 ## Requirements

@@ -5,6 +5,7 @@ import test from "node:test";
 import {
   CONNECT_TIMEOUT_MS,
   FRAME_HEIGHT,
+  HAZARD_MESSAGES,
   FRAME_WIDTH,
   MAX_BUFFERED_BYTES,
   MAX_RECONNECT_ATTEMPTS,
@@ -16,6 +17,7 @@ import {
   controlSocketUrl,
   mockInference,
   nextReconnectDelayMs,
+  parseHazard,
 } from "../../static/client/js/inference.js";
 import { FakeStream, connected, harness } from "./harness.mjs";
 
@@ -421,4 +423,33 @@ test("an older camera result cannot replace a successful post-suspension stream"
   assert.equal(h.controller.stream, newStream);
   assert.equal(h.ui["camera-feed"].srcObject, newStream);
   assert.equal(h.sockets.length, 1);
+});
+
+/* --------------------------- hazard relay (phase 5) ---------------------- */
+
+test("hazard frames are reduced to a known kind", () => {
+  assert.equal(parseHazard({ type: "hazard", hazard: "wall" }), "wall");
+  assert.equal(parseHazard({ type: "hazard", hazard: "collision" }), "collision");
+});
+
+test("hazard parsing rejects everything the server would not send", () => {
+  for (const payload of [
+    null,
+    "text",
+    3,
+    [],
+    { type: "telemetry", speed_kmh: 30 },
+    { type: "hazard" },
+    { type: "hazard", hazard: "offroad" },
+    { type: "hazard", hazard: "COLLISION" },
+    { type: "hazard", hazard: 7 },
+  ]) {
+    assert.equal(parseHazard(payload), null);
+  }
+});
+
+test("every hazard kind has a Persian warning for the banner", () => {
+  for (const kind of ["collision", "wall"]) {
+    assert.ok(HAZARD_MESSAGES[kind].length > 5);
+  }
 });

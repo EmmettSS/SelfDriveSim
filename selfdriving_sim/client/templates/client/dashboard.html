@@ -15,6 +15,11 @@
   <canvas id="process-canvas" width="160" height="120" hidden aria-hidden="true"></canvas>
   <div class="camera-shade" aria-hidden="true"></div>
 
+  <!-- Hazard warning relayed from the simulator: collision or wall grind. -->
+  <div id="hazard-banner" role="alert">
+    <span id="hazard-banner-text"></span>
+  </div>
+
   <main id="dashboard" class="dashboard-shell" data-model-url="{% static 'client/models/dave2/model.json' %}">
     <header class="dashboard-header flex items-center justify-between gap-3">
       <div class="flex items-center gap-3">
