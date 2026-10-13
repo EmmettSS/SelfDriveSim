@@ -123,6 +123,15 @@
       font-family: inherit;
     }
 
+    /* Minimal team credit line under the keyboard legend. */
+    .hud-credit {
+      display: block;
+      margin-top: 5px;
+      font-size: 10px;
+      opacity: 0.45;
+      letter-spacing: 0.01em;
+    }
+
     /*
      * Full-screen hazard flash, shown on collisions (red) and wall grinding
      * (orange). The phone camera sees it too, so the flash doubles as the
@@ -220,6 +229,7 @@
     <kbd>↑</kbd>/<kbd>W</kbd> گاز &nbsp;·&nbsp; <kbd>↓</kbd>/<kbd>S</kbd> ترمز &nbsp;·&nbsp; <kbd>←</kbd>/<kbd>→</kbd>/<kbd>A</kbd>/<kbd>D</kbd> فرمان
     <span aria-hidden="true">·</span> بدون فرمان گوشی، کیبورد می‌راند
     <a class="dashboard-link" href="{% url 'client:dashboard' %}" target="_blank" rel="noopener">داشبورد موبایل ↗</a>
+    <span class="hud-credit" dir="ltr">© Design &amp; Develop by Emmett Software Development Group</span>
   </div>
 
   <script type="module" src="{% static 'simulation/js/scene.js' %}"></script>

@@ -100,3 +100,19 @@ def test_head_dashboard_request(client):
     response = client.head("/dashboard/")
     assert response.status_code == 200
     assert response.content == b""
+
+
+def test_dashboard_shows_the_released_version_and_the_team_credit(client):
+    html = client.get("/dashboard/").content.decode()
+
+    assert '<span class="version-label hidden sm:inline">نسخه ۱٫۰</span>' in html
+    assert "© Design &amp; Develop by Emmett Software Development Group" in html
+    assert 'class="credit-line" dir="ltr"' in html
+
+
+def test_steering_wheel_hub_carries_the_team_wordmark(client):
+    html = client.get("/dashboard/").content.decode()
+    wheel = html.split('id="steering-wheel"', 1)[1].split("</svg>", 1)[0]
+
+    assert "<text" in wheel
+    assert "EMMETT" in wheel

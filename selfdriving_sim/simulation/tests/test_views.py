@@ -3,15 +3,15 @@
 from django.contrib.staticfiles import finders
 from django.urls import reverse
 
-from simulation.views import PHASE
+from simulation.views import VERSION
 
 
-def test_health_endpoint_reports_the_current_phase(client):
+def test_health_endpoint_reports_the_released_version(client):
     response = client.get("/health/")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "phase": PHASE}
-    assert PHASE == 6
+    assert response.json() == {"status": "ok", "version": VERSION}
+    assert VERSION == "1.0.0"
 
 
 def test_root_path_is_named_index():
@@ -45,3 +45,10 @@ def test_scene_page_loads_the_module_scripts(client):
 def test_every_static_asset_the_page_refers_to_exists():
     assert finders.find("simulation/js/scene.js") is not None
     assert finders.find("simulation/js/vendor/three.module.min.js") is not None
+
+
+def test_scene_page_carries_the_team_credit(client):
+    content = client.get("/").content.decode()
+
+    assert 'id="hud-legend"' in content
+    assert "© Design &amp; Develop by Emmett Software Development Group" in content

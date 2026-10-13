@@ -1,6 +1,6 @@
 {
   "name": "selfdrivesim-client",
-  "version": "0.3.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Local styles and browser tests for the mobile simulation dashboard",

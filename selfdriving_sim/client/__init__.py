@@ -1,1 +1,1 @@
-"""Mobile client app: camera capture, dashboard and in-browser inference (phase 3)."""
+"""Mobile client app: camera capture, dashboard and in-browser inference."""

@@ -66,15 +66,30 @@ echo "==> Collecting static files …"
 LAN_IPS="$(hostname -I 2>/dev/null || true)"
 [ -z "$LAN_IPS" ] && LAN_IPS="$(ip -o -4 addr show scope global 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | tr '\n' ' ' || true)"
 
-echo
-echo "    ┌─────────────────────────────────────────────────────────────┐"
-echo "    │  PC (renderer, fullscreen):  http://localhost:${PORT}/          │"
+# First non-loopback address: the one the phone has to reach on the same Wi-Fi.
+LAN_IP=""
 for ip in $LAN_IPS; do
-  echo "    │  PC over LAN:                http://${ip}:${PORT}/"
+  case "$ip" in
+    127.*) continue ;;
+  esac
+  LAN_IP="$ip"
+  break
 done
-echo "    │  Phone (needs HTTPS, see below):                            │"
-echo "    │    ngrok http ${PORT}   →  https://…/dashboard/                 │"
-echo "    └─────────────────────────────────────────────────────────────┘"
+PHONE_HOST="${LAN_IP:-<LAN-IP>}"
+
+echo
+echo "    PC (renderer, fullscreen):  http://localhost:${PORT}/"
+for ip in $LAN_IPS; do
+  echo "    PC over LAN:                http://${ip}:${PORT}/"
+done
+echo "    Phone:                      http://${PHONE_HOST}:${PORT}/dashboard/"
+echo "                                (with the Chrome flag, guide in docs/)"
+echo
+echo "    One-time phone setup — same Wi-Fi, then in Chrome on the phone:"
+echo "      chrome://flags/#unsafely-treat-insecure-origin-as-secure → Enabled"
+echo "      add  http://${PHONE_HOST}:${PORT}  →  Relaunch"
+echo "      then open  http://${PHONE_HOST}:${PORT}/dashboard/"
+echo "    Guide: docs/guide.fa.md (fa) · docs/guide.en.md (en)"
 echo
 echo "    Keyboard fallback drives the car when no phone command arrives."
 echo

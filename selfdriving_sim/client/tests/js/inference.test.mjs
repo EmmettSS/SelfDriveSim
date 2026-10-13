@@ -43,7 +43,7 @@ test("turn signals cycle off, left, off, right without overlapping", () => {
 
 test("WebSocket URLs use the current host, port and secure scheme", () => {
   assert.equal(controlSocketUrl({ protocol: "http:", host: "192.168.1.2:8000" }), "ws://192.168.1.2:8000/ws/control/");
-  assert.equal(controlSocketUrl({ protocol: "https:", host: "example.ngrok-free.app" }), "wss://example.ngrok-free.app/ws/control/");
+  assert.equal(controlSocketUrl({ protocol: "https:", host: "192.168.1.2:8443" }), "wss://192.168.1.2:8443/ws/control/");
   assert.equal(controlSocketUrl({ protocol: "https:", host: "[::1]:8443" }), "wss://[::1]:8443/ws/control/");
 });
 
@@ -91,7 +91,7 @@ test("init requests the rear camera first, then WSS, but never starts sending", 
   assert.equal(h.ui["camera-feed"].srcObject, h.stream);
   assert.equal(h.ui["camera-prompt"].hidden, true);
   assert.equal(h.ui["btn-start"].disabled, true, "handshake still pending");
-  assert.equal(h.sockets[0].url, "wss://sim.ngrok-free.app/ws/control/");
+  assert.equal(h.sockets[0].url, "wss://sim.local/ws/control/");
   h.sockets[0].open();
   assert.equal(h.ui["btn-start"].disabled, false);
   assert.equal(h.ui["ws-status"].classList.contains("green"), true);
@@ -104,6 +104,7 @@ test("insecure HTTP and unsupported media do not create a socket", async () => {
   assert.equal(await insecure.controller.init(), false);
   assert.equal(insecure.mediaCalls.length, 0);
   assert.equal(insecure.sockets.length, 0);
+  assert.match(insecure.ui["camera-message"].textContent, /guide\.fa\.md/);
   assert.match(insecure.ui["camera-message"].textContent, /HTTPS/);
   const unsupported = harness();
   unsupported.window.navigator.mediaDevices = undefined;
@@ -425,7 +426,7 @@ test("an older camera result cannot replace a successful post-suspension stream"
   assert.equal(h.sockets.length, 1);
 });
 
-/* --------------------------- hazard relay (phase 5) ---------------------- */
+/* ----------------------------- hazard relay ----------------------------- */
 
 test("hazard frames are reduced to a known kind", () => {
   assert.equal(parseHazard({ type: "hazard", hazard: "wall" }), "wall");

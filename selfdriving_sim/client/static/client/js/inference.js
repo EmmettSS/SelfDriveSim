@@ -48,7 +48,7 @@ export function mockInference(elapsedSeconds = 0) {
   };
 }
 
-/** Use the page's host, including its port; HTTPS tunnels require WSS. */
+/** Use the page's host, including its port; a secure page needs WSS. */
 export function controlSocketUrl(location) {
   return `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws/control/`;
 }
@@ -514,13 +514,13 @@ export class DashboardController {
   async requestCamera(generation) {
     this.showCameraPrompt("چشم‌های شبیه‌ساز", "برای دیدن مانیتور، دسترسی به دوربین عقب را تأیید کنید.", false);
     if (!this.window.isSecureContext) {
-      this.showCameraPrompt("اتصال امن لازم است", "دوربین روی IP محلی با HTTP فعال نمی‌شود. آدرس HTTPS تونل ngrok را همراه /dashboard/ مستقیماً در Chrome باز کنید.");
+      this.showCameraPrompt("اتصال امن لازم است", "دوربین روی IP محلی با HTTP فقط با فلگ Chrome اندروید کار می‌کند؛ گام‌به‌گام در docs/guide.fa.md آمده است. بدون آن به منبع امن HTTPS نیاز است.");
       this.setText("camera-status", "HTTPS لازم است");
       this.setSocketStatus("منتظر دوربین", "red");
       return false;
     }
     if (!this.window.navigator.mediaDevices?.getUserMedia) {
-      this.showCameraPrompt("دوربین پشتیبانی نمی‌شود", "از نسخهٔ به‌روز Chrome اندروید و یک آدرس HTTPS استفاده کنید.");
+      this.showCameraPrompt("دوربین پشتیبانی نمی‌شود", "از نسخهٔ به‌روز Chrome اندروید روی یک منبع امن (HTTPS یا فلگ Chrome) استفاده کنید.");
       this.setSocketStatus("منتظر دوربین", "red");
       return false;
     }
@@ -664,7 +664,7 @@ export class DashboardController {
     if (delay === null) {
       this.ui["btn-reconnect"].hidden = false;
       this.setSocketStatus("اتصال ناموفق", "red");
-      this.setStatus("تلاش‌های اتصال تمام شد. سرور و ngrok را بررسی کنید و «اتصال مجدد» را بزنید.");
+      this.setStatus("تلاش‌های اتصال تمام شد. سرور و شبکه را بررسی کنید و «اتصال مجدد» را بزنید.");
       return;
     }
     this.setSocketStatus(`تلاش مجدد ${this.reconnectAttempt}`, "red");

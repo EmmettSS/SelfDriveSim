@@ -38,7 +38,7 @@ async def test_group_message_round_trip_over_redis():
     assert isinstance(layer, RedisChannelLayer)
 
     channel = await layer.new_channel()
-    group = "phase1_redis_check"
+    group = "selfdrivesim_redis_check"
     await layer.group_add(group, channel)
     try:
         await layer.group_send(group, {"type": "ping.message", "value": 42})

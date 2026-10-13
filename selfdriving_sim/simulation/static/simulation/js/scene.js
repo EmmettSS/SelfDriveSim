@@ -1,8 +1,7 @@
 /**
  * Three.js first-person driving scene for the closed-loop simulator.
  *
- * Phase 5 turned the phase-2 "world scrolls past a parked car" stage into a
- * real closed loop: the ego car now owns a heading-based state
+ * The closed loop is real: the ego car owns a heading-based state
  * ``{x, z, speed, heading}`` and drives through the world, while the road,
  * the markings and the scenery follow it so the drive never ends. The camera
  * sits on the front bumper (first-person view), which is exactly the image
@@ -10,7 +9,7 @@
  *
  * The module is split in five parts:
  *
- *   1. Tuning constants (spec values of phase 5).
+ *   1. Tuning constants (the released v1.0 values).
  *   2. Pure helpers: the longitudinal/heading/position steps, the wall and
  *      collision maths, blinker timing and the camera pose. They never touch
  *      the DOM or WebGL, so ``simulation/tests/js/scene.test.mjs`` can import
@@ -75,7 +74,7 @@ export const DASH_SIZE = 3;
 export const DASH_GAP = 3;
 
 /**
- * Longitudinal model of the player car — the exact spec values of phase 5:
+ * Longitudinal model of the player car — the released v1.0 values:
  * maxSpeed 20, acceleration 8, braking 20, friction 2.
  */
 export const MAX_SPEED_MS = 20;
@@ -151,8 +150,8 @@ export const CAMERA_LOOK_AHEAD_M = 30;
 
 /**
  * A WebSocket command stays authoritative for this long. Without fresh phone
- * commands the keyboard fallback of phase 2 drives the car again, so the
- * scene stays usable when no phone is connected.
+ * commands the keyboard fallback drives the car again, so the scene stays
+ * usable when no phone is connected.
  */
 export const COMMAND_FRESH_S = 0.5;
 
@@ -262,8 +261,9 @@ export function normalizeCommand(payload) {
 }
 
 /**
- * One longitudinal step of the player car, exactly as the phase-5 brief spells
- * it out: brake wins over throttle, released pedals leave coasting friction,
+ * One longitudinal step of the player car, exactly as the released physics
+ * spells it out: brake wins over throttle, released pedals leave coasting
+ * friction,
  * and the result is clipped to 0..maxSpeed. Returns the speed in m/s.
  */
 export function stepLongitudinalSpeed(speed, throttle, brake, dt) {
@@ -706,7 +706,7 @@ function createSimulation(canvas, hooks) {
   const { buildCar, bodyMaterial } = createCarFactory();
 
   /**
-   * The state of the ego car, in the units of the phase-5 brief. The car
+   * The state of the ego car, in the units of the released physics. The car
    * drives towards -z; heading is in radians, 0 = straight ahead.
    */
   const state = {
@@ -1309,7 +1309,7 @@ function boot() {
     simulation.setKeyboardControls(controls);
   });
 
-  // The phase-5 entry point: every validated command from the phone lands
+  // The control entry point: every validated command from the phone lands
   // here, before any physics step reads it.
   window.applyControls = (data) => {
     simulation.receiveCommand(data);
@@ -1330,7 +1330,7 @@ function boot() {
   loop();
 }
 
-// Expose the phase 5 entry point before any command can arrive. Guarded so the
+// Expose the control entry point before any command can arrive. Guarded so the
 // module stays importable outside a browser, for the Node tests.
 if (typeof window !== "undefined") {
   if (typeof document !== "undefined" && document.getElementById("scene-canvas") !== null) {

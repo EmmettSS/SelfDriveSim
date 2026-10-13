@@ -6,7 +6,7 @@
  *     node --test "simulation/tests/js/*.test.mjs"
  *
  * `scene.js` imports the vendored ES module build of Three.js and only touches
- * the DOM inside `boot()`, so the module loads in Node and the phase-5 physics
+ * the DOM inside `boot()`, so the module loads in Node and the released physics
  * (speed, heading, position), the wall, the blinker timing, the collision box
  * maths, the camera pose and the reconnect logic can be checked directly.
  */
@@ -86,7 +86,7 @@ test("clamp keeps values inside the inclusive bounds", () => {
 
 /* --------------------------- longitudinal model -------------------------- */
 
-test("the longitudinal constants match the phase-5 spec values", () => {
+test("the longitudinal constants match the released v1.0 values", () => {
   assert.equal(MAX_SPEED_MS, 20);
   assert.equal(ACCELERATION_MS2, 8);
   assert.equal(BRAKE_DECELERATION_MS2, 20);
@@ -117,7 +117,7 @@ test("speed is clipped to 0..maxSpeed", () => {
 
 /* ------------------------------ heading model ---------------------------- */
 
-test("the steering constants match the phase-5 spec values", () => {
+test("the steering constants match the released v1.0 values", () => {
   assert.equal(STEER_RATE, 1.5);
   assert.equal(HEADING_MIN_SPEED_MS, 0.5);
   assert.equal(HEADING_SPEED_REF_MS, 5);

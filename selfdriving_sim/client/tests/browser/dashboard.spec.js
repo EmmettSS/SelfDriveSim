@@ -169,7 +169,7 @@ for (const [name, message] of [["NotFoundError", "دوربینی پیدا نشد
   });
 }
 
-test("insecure origin explains HTTPS/ngrok before attempting media access", async ({ page }) => {
+test("insecure origin points at the Chrome flag guide before attempting media access", async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(window, "isSecureContext", { value: false });
     window.mediaRequests = 0;
@@ -177,7 +177,7 @@ test("insecure origin explains HTTPS/ngrok before attempting media access", asyn
   });
   await page.goto("/dashboard/");
   await expect(page.locator("#camera-title")).toContainText("اتصال امن");
-  await expect(page.locator("#camera-message")).toContainText("ngrok");
+  await expect(page.locator("#camera-message")).toContainText("guide.fa.md");
   await expect(page.locator("#btn-start")).toBeDisabled();
   expect(await page.evaluate(() => window.mediaRequests)).toBe(0);
 });

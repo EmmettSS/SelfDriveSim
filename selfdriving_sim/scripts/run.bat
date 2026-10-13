@@ -60,10 +60,26 @@ echo ==^> Collecting static files ...
 if errorlevel 1 goto :failed
 
 rem --- 4. URLs -------------------------------------------------
+rem First IPv4 address ipconfig reports: the one the phone reaches on
+rem the same Wi-Fi.
+set "LAN_IP="
+for /f "tokens=2 delims=:" %%a in ('ipconfig ^| findstr /C:"IPv4"') do (
+    if not defined LAN_IP set "LAN_IP=%%a"
+)
+if defined LAN_IP set "LAN_IP=%LAN_IP: =%"
+if not defined LAN_IP set "LAN_IP=<LAN-IP>"
+
 echo.
 echo     PC renderer (fullscreen):   http://localhost:%PORT%/
-echo     Phone dashboard needs HTTPS:
-echo         ngrok http %PORT%    then open  https://.../dashboard/  on the phone
+echo     Phone:                      http://%LAN_IP%:%PORT%/dashboard/
+echo                                 (with the Chrome flag, guide in docs/)
+echo.
+echo     One-time phone setup - same Wi-Fi, then in Chrome on the phone:
+echo       chrome://flags/#unsafely-treat-insecure-origin-as-secure  -^>  Enabled
+echo       add  http://%LAN_IP%:%PORT%  -^>  Relaunch
+echo       then open  http://%LAN_IP%:%PORT%/dashboard/
+echo     Guide: docs\guide.fa.md (fa) - docs\guide.en.md (en)
+echo.
 echo     Keyboard fallback drives the car when no phone command arrives.
 echo.
 

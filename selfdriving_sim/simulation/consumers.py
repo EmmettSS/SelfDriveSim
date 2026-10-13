@@ -141,8 +141,8 @@ class ControlConsumer(AsyncJsonWebsocketConsumer):
     """Receives driving commands from the phone and broadcasts them to renderers."""
 
     async def connect(self):
-        # Control clients also join the render group, as the phase 1 design requires.
-        # This lets renderer status messages reach the phone in later phases.
+        # Control clients also join the render group, so renderer status
+        # messages can reach the phone as well.
         await self.channel_layer.group_add(RENDER_GROUP, self.channel_name)
         await self.accept()
 

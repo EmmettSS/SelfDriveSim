@@ -48,7 +48,7 @@ MIDDLEWARE = [
 ]
 
 # Opt-in only for an embedded development preview. Keep clickjacking protection
-# for normal local/ngrok use and never enable this outside development.
+# for normal local use and never enable this outside development.
 ALLOW_IFRAME_PREVIEW = DEBUG and os.environ.get("DJANGO_ALLOW_IFRAME_PREVIEW") == "1"
 if ALLOW_IFRAME_PREVIEW:
     MIDDLEWARE.remove("django.middleware.clickjacking.XFrameOptionsMiddleware")
@@ -123,7 +123,8 @@ CSRF_TRUSTED_ORIGINS += [
 # Value of the Cross-Origin-Opener-Policy header set by SecurityMiddleware.
 SECURE_CROSS_ORIGIN_OPENER_POLICY = "same-origin-allow-popups"
 
-# Phase 3 diagnostics: one line per validated frame, visible in runserver/Daphne.
+# Control-stream diagnostics: one line per validated frame, visible in
+# runserver/Daphne.
 # Set SIMULATION_CONTROL_LOG_LEVEL=WARNING to silence the 20 Hz stream.
 LOGGING = {
     "version": 1,
