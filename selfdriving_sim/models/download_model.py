@@ -1,4 +1,4 @@
-"""Download the DAVE-2-GRU checkpoint from Hugging Face (phase 4, task 1).
+"""Download the DAVE-2-GRU checkpoint from Hugging Face.
 
 Run from selfdriving_sim/::
 
@@ -35,8 +35,8 @@ from dave2_config import (
 )
 
 # File names tried in order. The first one is the checkpoint path in the pinned
-# revision. The root-level names come from the phase-4 brief and are kept as
-# fallbacks; the pinned revision does not contain them.
+# revision. The bare root-level names are kept as fallbacks for a hand-made
+# copy; the pinned revision does not contain them.
 CANDIDATE_TEMPLATES = (
     "{folder}/" + CHECKPOINT_FILENAME,
     "best_model.h5",

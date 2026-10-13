@@ -98,13 +98,13 @@ TURN_SIGNAL_OFF_LOGIT = 20.0
 LEARNING_RATE = 1e-4
 
 MODELS_DIR = Path(__file__).resolve().parent
-# Large files that Git ignores (see .gitignore and models/README.md).
+# Large files that Git ignores (see .gitignore and docs/guide.en.md).
 DATA_DIR = MODELS_DIR / "data"
 EXTENDED_MODEL_PATH = DATA_DIR / "dave2_gru_extended.h5"
 PARITY_DIR = DATA_DIR / "parity"
 # The converted model is committed here and served by Django as a static file.
 WEB_MODEL_DIR = MODELS_DIR.parent / "client" / "static" / "client" / "models" / "dave2"
-# Budget from the phase-4 brief, in decimal megabytes.
+# Budget for the browser model, in decimal megabytes.
 MAX_WEB_MODEL_BYTES = 10 * 1000 * 1000
 
 

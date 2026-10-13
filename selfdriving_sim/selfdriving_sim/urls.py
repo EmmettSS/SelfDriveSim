@@ -1,7 +1,7 @@
 """Root URL configuration.
 
 - ``/admin/``: Django admin site.
-- ``/health/``: liveness probe that reports the current development phase.
+- ``/health/``: liveness probe that reports the released version.
 - The Three.js simulation is included at the root.
 - The mobile camera dashboard is mounted under ``/dashboard/``.
 """

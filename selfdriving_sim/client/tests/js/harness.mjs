@@ -110,7 +110,7 @@ export function harness({ secure = true, getUserMedia, runtime, logger = silentL
   Object.assign(window, {
     isSecureContext: secure,
     performance: { now: () => clock.now },
-    location: { protocol: "https:", host: "sim.ngrok-free.app" },
+    location: { protocol: "https:", host: "sim.local" },
     navigator: { mediaDevices: { getUserMedia: async (constraints) => {
       mediaCalls.push(constraints);
       return getUserMedia ? getUserMedia(constraints) : stream;

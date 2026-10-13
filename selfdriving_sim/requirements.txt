@@ -1,11 +1,11 @@
-# Phase 1: web server stack
+# Web server stack
 Django>=5.2,<5.3
 channels>=4.1,<5.0
 channels-redis>=4.2,<5.0
 daphne>=4.1,<5.0
 redis>=5.0,<6.0
 
-# ML stack (used from phase 4 onward).
+# ML stack (used by the model pipeline).
 # tensorflow-decision-forests, a dependency of tensorflowjs, ships no Windows
 # wheels for TensorFlow 2.16+, so the TensorFlow packages are installed on
 # Linux and macOS only. On Windows, run the ML toolchain inside WSL2.

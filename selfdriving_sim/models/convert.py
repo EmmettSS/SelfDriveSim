@@ -1,4 +1,4 @@
-"""Convert the extended model to TensorFlow.js with float16 weights (phase 4, task 3).
+"""Convert the extended model to TensorFlow.js with float16 weights.
 
 Run from selfdriving_sim/ after extend_model.py::
 

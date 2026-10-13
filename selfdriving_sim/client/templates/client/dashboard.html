@@ -32,7 +32,7 @@
         </div>
       </div>
       <div class="flex items-center gap-3">
-        <span class="phase-label hidden sm:inline">فاز ۰۴</span>
+        <span class="version-label hidden sm:inline">نسخه ۱٫۰</span>
         <span class="mode-badge" dir="ltr"><span class="mode-dot" aria-hidden="true"></span><span id="mode-badge">MOCK MODE</span></span>
       </div>
     </header>
@@ -123,7 +123,8 @@
               <path d="m29 95 56 9 13 25-66-13ZM191 95l-56 9-13 25 66-13ZM94 131h32l-8 64h-16Z" fill="url(#wheel-spoke)" stroke="#6e7d83" stroke-opacity=".3"/>
               <rect x="106" y="14" width="8" height="16" rx="3" fill="#f5d764"/>
               <path d="M76 110c0-21 15-32 34-32s34 11 34 32v5c0 20-15 37-34 37s-34-17-34-37Z" fill="url(#wheel-hub)" stroke="#5c6b72" stroke-opacity=".5"/>
-              <path d="m102 117 4-17h8l4 17m-14-5h12" fill="none" stroke="#ced7d9" stroke-width="2.5" stroke-linecap="round"/>
+              <!-- Team wordmark in the hub centre; rotates with the wheel. -->
+              <text x="110" y="120.5" text-anchor="middle" font-family="Vazirmatn, 'Segoe UI', sans-serif" font-size="14" font-weight="800" letter-spacing="0.6" fill="#dbe4e8" fill-opacity=".95">EMMETT</text>
               <path d="M49 99h15M156 99h15" stroke="#8c9a9f" stroke-width="2" stroke-linecap="round"/>
               <path d="M90 54c13-5 27-5 40 0" fill="none" stroke="#69777e" stroke-width="1" stroke-dasharray="2 4"/>
             </svg>
@@ -162,6 +163,7 @@
 
     <footer class="dashboard-footer flex items-center justify-between gap-3 text-[10px] text-muted">
       <span class="privacy-note">تصویر روی گوشی می‌ماند؛ فقط فرمان ارسال می‌شود.</span>
+      <span class="credit-line" dir="ltr">© Design &amp; Develop by Emmett Software Development Group</span>
       <a href="{% url 'simulation:index' %}" target="_blank" rel="noopener" class="simulator-link">نمایشگر شبیه‌ساز <span aria-hidden="true">↗</span></a>
     </footer>
     <noscript><p class="noscript-warning">برای استفاده از دوربین و ارسال فرمان، JavaScript مرورگر را فعال کنید.</p></noscript>

@@ -4,8 +4,8 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_safe
 from django.views.generic import TemplateView
 
-# Development phase reported by the health endpoint.
-PHASE = 6
+# Released version reported by the health endpoint.
+VERSION = "1.0.0"
 
 
 class SimulatorView(TemplateView):
@@ -17,4 +17,4 @@ class SimulatorView(TemplateView):
 @require_safe
 def health(request):
     """Return a liveness payload for smoke tests and deployment checks."""
-    return JsonResponse({"status": "ok", "phase": PHASE})
+    return JsonResponse({"status": "ok", "version": VERSION})

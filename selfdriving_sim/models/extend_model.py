@@ -1,4 +1,4 @@
-"""Turn the DAVE-2-GRU checkpoint into the four-head model the phone runs (phase 4).
+"""Turn the DAVE-2-GRU checkpoint into the four-head model the phone runs.
 
 The checkpoint predicts ``[steering, throttle]`` from three consecutive frames of
 raw 0..255 pixels. This script produces ``dave2_gru_extended.h5`` with four heads
@@ -19,12 +19,13 @@ single computed value:
   and the scaling is folded into the first convolution's kernel, because
   ``W·(s·x) + b == (W·s)·x + b``. The extended model therefore still takes the
   raw 0..255 pixels the checkpoint was trained on, and the phone does not scale.
-* ``steering`` and ``throttle`` keep the trained head's linear activation. The
-  phase-4 brief suggested ``tanh`` and ``sigmoid``, but the trained values are
-  already the protocol's ranges (steering about [-1, 1], throttle about [0, 1]),
-  so squashing them again would shrink full lock to ``tanh(1) == 0.76`` and turn a
-  trained ``throttle == 0`` into ``sigmoid(0) == 0.5``. The phone clamps instead
-  (see ``toCommand`` in ``client/static/client/js/inference.js``).
+* ``steering`` and ``throttle`` keep the trained head's linear activation. An
+  activation layer such as ``tanh`` or ``sigmoid`` would squash values that
+  already sit in the protocol's ranges: full lock would shrink to
+  ``tanh(1) == 0.76`` and a trained ``throttle == 0`` would become
+  ``sigmoid(0) == 0.5`` — a car that always accelerates. The phone clamps the
+  two values instead (see ``toCommand`` in
+  ``client/static/client/js/inference.js``).
 
 Both steps are checked numerically before the model is saved: the restructured
 network must reproduce the checkpoint's outputs, and the heads must reproduce the
@@ -315,7 +316,7 @@ def check_wiring(
 
 
 def compile_model(model: keras.Model) -> None:
-    """Compile with the losses from the phase-4 brief. Training is not run in this phase."""
+    """Compile with the head losses. Training is out of scope for this script."""
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=LEARNING_RATE),
         loss={
