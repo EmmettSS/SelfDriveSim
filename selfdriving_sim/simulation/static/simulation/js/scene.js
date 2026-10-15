@@ -4,8 +4,8 @@
  * The closed loop is real: the ego car owns a heading-based state
  * ``{x, z, speed, heading}`` and drives through the world, while the road,
  * the markings and the scenery follow it so the drive never ends. The camera
- * sits on the front bumper (first-person view), which is exactly the image
- * the DAVE-2-GRU model on the phone expects.
+ * sits on the front bumper (first-person view), which is the image used by
+ * the phone controller and the simulator data collector.
  *
  * The module is split in five parts:
  *
@@ -23,6 +23,7 @@
  */
 
 import * as THREE from "./vendor/three.module.min.js";
+import { BASE_DOMAIN_PROFILE, createSeededRandom } from "./domain-randomization.js";
 
 /* ------------------------------------------------------------------------- *
  * 1. Tuning constants
@@ -191,19 +192,19 @@ export function pickSpawnDelay(random = Math.random) {
 }
 
 /** x position of the lane a traffic car is spawned in. */
-export function pickLane(random = Math.random) {
-  const index = Math.floor(random() * LANE_CENTRES.length) % LANE_CENTRES.length;
-  return LANE_CENTRES[index];
+export function pickLane(random = Math.random, laneCentres = LANE_CENTRES) {
+  const index = Math.floor(random() * laneCentres.length) % laneCentres.length;
+  return laneCentres[index];
 }
 
 /** Closing speed of a traffic car, in units per second. */
-export function pickTrafficSpeed(random = Math.random) {
-  return randomBetween(TRAFFIC_SPEED_MIN, TRAFFIC_SPEED_MAX, random);
+export function pickTrafficSpeed(random = Math.random, minimum = TRAFFIC_SPEED_MIN, maximum = TRAFFIC_SPEED_MAX) {
+  return randomBetween(minimum, maximum, random);
 }
 
 /** Distance ahead of the ego car where the next traffic car is spawned. */
-export function pickSpawnGap(random = Math.random) {
-  return randomBetween(SPAWN_GAP_MIN_M, SPAWN_GAP_MAX_M, random);
+export function pickSpawnGap(random = Math.random, minimum = SPAWN_GAP_MIN_M, maximum = SPAWN_GAP_MAX_M) {
+  return randomBetween(minimum, maximum, random);
 }
 
 /** World z of a traffic car spawned ``gap`` units ahead of ``egoZ``. */
@@ -212,9 +213,9 @@ export function trafficSpawnZ(egoZ, gap) {
 }
 
 /** Paint colour of a traffic car. */
-export function pickTrafficColour(random = Math.random) {
-  const index = Math.floor(random() * TRAFFIC_COLOURS.length) % TRAFFIC_COLOURS.length;
-  return TRAFFIC_COLOURS[index];
+export function pickTrafficColour(random = Math.random, palette = TRAFFIC_COLOURS) {
+  const index = Math.floor(random() * palette.length) % palette.length;
+  return palette[index];
 }
 
 /** Whether the pool has room for one more traffic car. */
@@ -330,19 +331,23 @@ export function blinkerIsLit(phase) {
  * the facing direction) and looks CAMERA_LOOK_AHEAD_M ahead at eye height.
  * Facing direction for heading h is (sin h, -cos h).
  */
-export function cameraPose(x, z, heading) {
+export function cameraPose(x, z, heading, {
+  eyeHeight = CAMERA_EYE_HEIGHT,
+  bumper = CAMERA_BUMPER_M,
+  lookAhead = CAMERA_LOOK_AHEAD_M,
+} = {}) {
   const sinH = Math.sin(heading);
   const cosH = Math.cos(heading);
   return {
     position: {
-      x: x + CAMERA_BUMPER_M * sinH,
-      y: CAMERA_EYE_HEIGHT,
-      z: z - CAMERA_BUMPER_M * cosH,
+      x: x + bumper * sinH,
+      y: eyeHeight,
+      z: z - bumper * cosH,
     },
     lookAt: {
-      x: x + CAMERA_LOOK_AHEAD_M * sinH,
-      y: CAMERA_EYE_HEIGHT,
-      z: z - CAMERA_LOOK_AHEAD_M * cosH,
+      x: x + lookAhead * sinH,
+      y: eyeHeight,
+      z: z - lookAhead * cosH,
     },
   };
 }
@@ -406,8 +411,30 @@ const SCENERY_SPACING = 22;
 /** Scenery stays within this distance behind the car before it is recycled. */
 const SCENERY_KEEP_BEHIND_M = 25;
 
-function createRenderer(canvas) {
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+function createSurfaceTexture(random, repeatX, repeatY, markCount = 1800) {
+  if (typeof document === "undefined") return null;
+  const canvas = document.createElement("canvas");
+  canvas.width = 128;
+  canvas.height = 128;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#e8e8e8";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  for (let index = 0; index < markCount; index += 1) {
+    const value = Math.floor(132 + random() * 108);
+    const size = random() < 0.94 ? 1 : 2 + Math.floor(random() * 3);
+    context.fillStyle = `rgba(${value},${value},${value},${0.08 + random() * 0.22})`;
+    context.fillRect(Math.floor(random() * 128), Math.floor(random() * 128), size, size);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(repeatX, repeatY);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+function createRenderer(canvas, { preserveDrawingBuffer = false } = {}) {
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
@@ -415,32 +442,36 @@ function createRenderer(canvas) {
   return renderer;
 }
 
-function createScene() {
+function createScene(domain = BASE_DOMAIN_PROFILE) {
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(SKY_COLOUR);
+  scene.background = new THREE.Color(domain.skyColor ?? SKY_COLOUR);
   // The fog hides the far end of the road, where traffic appears.
-  scene.fog = new THREE.Fog(SKY_COLOUR, FOG_NEAR, FOG_FAR);
+  scene.fog = new THREE.Fog(
+    domain.skyColor ?? SKY_COLOUR,
+    domain.fogNear ?? FOG_NEAR,
+    domain.fogFar ?? FOG_FAR,
+  );
   return scene;
 }
 
-function createCamera() {
+function createCamera(domain = BASE_DOMAIN_PROFILE) {
   const camera = new THREE.PerspectiveCamera(
-    CAMERA_FOV,
+    domain.cameraFov ?? CAMERA_FOV,
     window.innerWidth / window.innerHeight,
     0.1,
     600,
   );
   // The first frame of update() snaps this to the bumper pose.
-  const pose = cameraPose(0, 0, 0);
+  const pose = cameraPose(0, 0, 0, { eyeHeight: domain.cameraEyeHeight ?? CAMERA_EYE_HEIGHT });
   camera.position.set(pose.position.x, pose.position.y, pose.position.z);
   camera.lookAt(pose.lookAt.x, pose.lookAt.y, pose.lookAt.z);
   return camera;
 }
 
-function createLights(scene) {
-  scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+function createLights(scene, domain = BASE_DOMAIN_PROFILE) {
+  scene.add(new THREE.AmbientLight(0xffffff, domain.ambientIntensity ?? 0.55));
 
-  const sun = new THREE.DirectionalLight(0xfff4e0, 1.1);
+  const sun = new THREE.DirectionalLight(domain.sunColor ?? 0xfff4e0, domain.sunIntensity ?? 1.1);
   sun.castShadow = true;
   sun.shadow.mapSize.set(1024, 1024);
   // The shadow volume only has to cover the road around the player car.
@@ -463,12 +494,30 @@ function createLights(scene) {
  * the simulation snaps the group forward in multiples of the dash period,
  * where the pattern maps onto itself and the jump is invisible.
  */
-function createRoadRoot(scene) {
+function createRoadRoot(scene, domain = BASE_DOMAIN_PROFILE, random = Math.random) {
   const root = new THREE.Group();
+  const groundMaterial = new THREE.MeshStandardMaterial({
+    color: domain.groundColor ?? GROUND_COLOUR,
+    roughness: 1,
+  });
+  const roadMaterial = new THREE.MeshStandardMaterial({
+    color: domain.roadColor ?? ROAD_COLOUR,
+    roughness: 0.95,
+  });
+  const surfaceTextures = [];
+  if (domain.texturedSurfaces) {
+    const textureRandom = createSeededRandom(domain.textureSeed ?? 0);
+    groundMaterial.map = createSurfaceTexture(textureRandom, 26, 48, 2300);
+    roadMaterial.map = createSurfaceTexture(textureRandom, 8, 128, 3100);
+    surfaceTextures.push(
+      { texture: groundMaterial.map, length: ROAD_LENGTH + 60 },
+      { texture: roadMaterial.map, length: ROAD_LENGTH },
+    );
+  }
 
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(240, ROAD_LENGTH + 60),
-    new THREE.MeshStandardMaterial({ color: GROUND_COLOUR, roughness: 1 }),
+    groundMaterial,
   );
   ground.rotation.x = -Math.PI / 2;
   ground.position.set(0, -0.02, ROAD_Z_CENTRE);
@@ -477,40 +526,49 @@ function createRoadRoot(scene) {
 
   const road = new THREE.Mesh(
     new THREE.PlaneGeometry(ROAD_WIDTH, ROAD_LENGTH),
-    new THREE.MeshStandardMaterial({ color: ROAD_COLOUR, roughness: 0.95 }),
+    roadMaterial,
   );
   road.rotation.x = -Math.PI / 2;
   road.position.set(0, 0, ROAD_Z_CENTRE);
   road.receiveShadow = true;
   root.add(road);
 
-  const lineSpan = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(0, 0.02, ROAD_Z_CENTRE - ROAD_LENGTH / 2),
-    new THREE.Vector3(0, 0.02, ROAD_Z_CENTRE + ROAD_LENGTH / 2),
-  ]);
-
-  const dashMaterial = new THREE.LineDashedMaterial({
-    color: 0xffffff,
-    dashSize: DASH_SIZE,
-    gapSize: DASH_GAP,
+  const dashSize = domain.dashSize ?? DASH_SIZE;
+  const dashGap = domain.dashGap ?? DASH_GAP;
+  const markingMaterial = new THREE.MeshStandardMaterial({
+    color: domain.markingColor ?? 0xffffff,
+    roughness: 1,
   });
+  const dashCount = Math.floor((ROAD_LENGTH + dashGap) / (dashSize + dashGap));
+  const dashGeometry = new THREE.BoxGeometry(0.14, 0.025, dashSize);
+  const marker = new THREE.Object3D();
   for (const x of LANE_DIVIDER_X) {
-    const line = new THREE.Line(lineSpan, dashMaterial);
-    line.position.x = x;
-    line.computeLineDistances();
-    root.add(line);
+    const dashes = new THREE.InstancedMesh(dashGeometry, markingMaterial, dashCount);
+    for (let index = 0; index < dashCount; index += 1) {
+      marker.position.set(
+        x,
+        0.025,
+        ROAD_Z_CENTRE - ROAD_LENGTH / 2 + dashSize / 2 + index * (dashSize + dashGap),
+      );
+      marker.updateMatrix();
+      dashes.setMatrixAt(index, marker.matrix);
+    }
+    dashes.instanceMatrix.needsUpdate = true;
+    dashes.castShadow = false;
+    root.add(dashes);
   }
 
-  const edgeMaterial = new THREE.LineBasicMaterial({ color: 0xffffff });
+  const edgeGeometry = new THREE.BoxGeometry(0.18, 0.025, ROAD_LENGTH);
   const halfWidth = ROAD_WIDTH / 2 - 0.5;
   for (const x of [-halfWidth, halfWidth]) {
-    const line = new THREE.Line(lineSpan, edgeMaterial);
-    line.position.x = x;
-    root.add(line);
+    const edge = new THREE.Mesh(edgeGeometry, markingMaterial);
+    edge.position.set(x, 0.025, ROAD_Z_CENTRE);
+    edge.castShadow = false;
+    root.add(edge);
   }
 
   const railMaterial = new THREE.MeshStandardMaterial({
-    color: 0x9e9e9e,
+    color: domain.railColor ?? 0x9e9e9e,
     roughness: 0.5,
     metalness: 0.6,
   });
@@ -523,6 +581,8 @@ function createRoadRoot(scene) {
   }
 
   scene.add(root);
+  root.userData.dashPeriod = dashSize + dashGap;
+  root.userData.surfaceTextures = surfaceTextures;
   return root;
 }
 
@@ -531,15 +591,24 @@ function createRoadRoot(scene) {
  * the car has driven past one by SCENERY_KEEP_BEHIND_M it is moved one span
  * ahead, so the decoration is endless too.
  */
-function createScenery(scene) {
+function createScenery(scene, domain = BASE_DOMAIN_PROFILE, random = Math.random) {
   const group = new THREE.Group();
 
   const trunkGeometry = new THREE.CylinderGeometry(0.22, 0.3, 2.2, 6);
-  const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x5d4037, roughness: 1 });
+  const trunkMaterial = new THREE.MeshStandardMaterial({
+    color: domain.trunkColor ?? 0x5d4037,
+    roughness: 1,
+  });
   const crownGeometry = new THREE.ConeGeometry(1.7, 4.4, 7);
-  const crownMaterial = new THREE.MeshStandardMaterial({ color: 0x2e7d32, roughness: 1 });
+  const crownMaterial = new THREE.MeshStandardMaterial({
+    color: domain.foliageColor ?? 0x2e7d32,
+    roughness: 1,
+  });
   const poleGeometry = new THREE.CylinderGeometry(0.12, 0.16, 7, 8);
-  const poleMaterial = new THREE.MeshStandardMaterial({ color: 0x616161, roughness: 0.7 });
+  const poleMaterial = new THREE.MeshStandardMaterial({
+    color: domain.poleColor ?? 0x616161,
+    roughness: 0.7,
+  });
   const headGeometry = new THREE.BoxGeometry(0.5, 0.22, 1.2);
   const headMaterial = new THREE.MeshStandardMaterial({
     color: 0x37474f,
@@ -561,10 +630,14 @@ function createScenery(scene) {
       crown.position.y = 3.9;
       crown.castShadow = true;
       tree.add(trunk, crown);
+      const jitterX = domain.texturedSurfaces ? randomBetween(-3, 3, random) : 0;
+      const jitterZ = domain.texturedSurfaces ? randomBetween(-5, 5, random) : 0;
+      const scale = domain.texturedSurfaces ? randomBetween(0.82, 1.2, random) : 1;
+      tree.scale.setScalar(scale);
       tree.position.set(
-        side * (14 + Math.abs((z * 7) % 9)),
+        side * (14 + Math.abs((z * 7) % 9)) + jitterX,
         0,
-        z + Math.abs((z * 3) % SCENERY_SPACING),
+        z + Math.abs((z * 3) % SCENERY_SPACING) + jitterZ,
       );
       group.add(tree);
     }
@@ -579,7 +652,8 @@ function createScenery(scene) {
       const head = new THREE.Mesh(headGeometry, headMaterial);
       head.position.set(-side * 0.5, 6.9, 0);
       lamp.add(pole, head);
-      lamp.position.set(side * 11, 0, z);
+      const jitterZ = domain.texturedSurfaces ? randomBetween(-4, 4, random) : 0;
+      lamp.position.set(side * 11, 0, z + jitterZ);
       group.add(lamp);
     }
   }
@@ -692,17 +766,31 @@ function createCarFactory() {
  * ``hooks.hud`` receives the HUD readouts, ``hooks.onTelemetry`` the periodic
  * speed frame and ``hooks.onHazard`` every collision/wall event.
  */
-function createSimulation(canvas, hooks) {
+export function createSimulation(canvas, hooks, {
+  random = Math.random,
+  domain = BASE_DOMAIN_PROFILE,
+  preserveDrawingBuffer = false,
+  trafficSettings = {},
+} = {}) {
   const { hud, onTelemetry, onHazard } = hooks;
-
-  const renderer = createRenderer(canvas);
-  const scene = createScene();
+  const appearance = { ...BASE_DOMAIN_PROFILE, ...domain };
+  const trafficConfig = {
+    spawnDelayMinS: SPAWN_DELAY_MIN_S,
+    spawnDelayMaxS: SPAWN_DELAY_MAX_S,
+    spawnGapMinM: SPAWN_GAP_MIN_M,
+    spawnGapMaxM: SPAWN_GAP_MAX_M,
+    speedMin: TRAFFIC_SPEED_MIN,
+    speedMax: TRAFFIC_SPEED_MAX,
+    ...trafficSettings,
+  };
+  const renderer = createRenderer(canvas, { preserveDrawingBuffer });
+  const scene = createScene(appearance);
   // Blinker lamps are camera children, so the camera must be part of the graph.
-  const camera = createCamera();
+  const camera = createCamera(appearance);
   scene.add(camera);
-  const sun = createLights(scene);
-  const roadRoot = createRoadRoot(scene);
-  const scenery = createScenery(scene);
+  const sun = createLights(scene, appearance);
+  const roadRoot = createRoadRoot(scene, appearance, random);
+  const scenery = createScenery(scene, appearance, random);
   const { buildCar, bodyMaterial } = createCarFactory();
 
   /**
@@ -787,7 +875,7 @@ function createSimulation(canvas, hooks) {
 
   const traffic = {
     cars: [], // every pooled car, active or not
-    timer: pickSpawnDelay(),
+    timer: randomBetween(trafficConfig.spawnDelayMinS, trafficConfig.spawnDelayMaxS, random),
   };
 
   /** Take an inactive car from the pool, or build one if there is room. */
@@ -813,13 +901,16 @@ function createSimulation(canvas, hooks) {
    * Place a traffic car in a random lane, SPAWN_GAP ahead of the ego car,
    * driving towards it (+z, so the mesh faces +z via rotation.y = PI).
    */
-  function spawnTrafficCar() {
+  function spawnTrafficCar(overrides = {}) {
     const car = acquireTrafficCar();
     if (car === null) {
       return false;
     }
-    const x = pickLane();
-    const z = trafficSpawnZ(state.z, pickSpawnGap());
+    const x = Number.isFinite(overrides.x) ? overrides.x : pickLane(random);
+    const gap = Number.isFinite(overrides.gap)
+      ? overrides.gap
+      : pickSpawnGap(random, trafficConfig.spawnGapMinM, trafficConfig.spawnGapMaxM);
+    const z = Number.isFinite(overrides.z) ? overrides.z : trafficSpawnZ(state.z, gap);
     // Do not stack cars on top of each other in the same lane.
     for (const other of traffic.cars) {
       if (
@@ -831,8 +922,11 @@ function createSimulation(canvas, hooks) {
         return false; // car stays inactive; the next timer tick tries again
       }
     }
-    car.userData.speed = pickTrafficSpeed();
-    car.userData.body.material = bodyMaterial(pickTrafficColour());
+    car.userData.speed = Number.isFinite(overrides.speed)
+      ? overrides.speed
+      : pickTrafficSpeed(random, trafficConfig.speedMin, trafficConfig.speedMax);
+    const colour = Number.isFinite(overrides.colour) ? overrides.colour : pickTrafficColour(random);
+    car.userData.body.material = bodyMaterial(colour);
     car.position.set(x, 0, z);
     car.rotation.y = Math.PI;
     car.userData.active = true;
@@ -859,7 +953,7 @@ function createSimulation(canvas, hooks) {
     traffic.timer -= dt;
     if (traffic.timer <= 0) {
       spawnTrafficCar();
-      traffic.timer = pickSpawnDelay();
+      traffic.timer = randomBetween(trafficConfig.spawnDelayMinS, trafficConfig.spawnDelayMaxS, random);
     }
   }
 
@@ -869,8 +963,12 @@ function createSimulation(canvas, hooks) {
    * snap never moves a visible feature.
    */
   function updateEndlessRoad() {
-    const period = DASH_SIZE + DASH_GAP;
+    const period = roadRoot.userData.dashPeriod ?? (DASH_SIZE + DASH_GAP);
     roadRoot.position.z = period * Math.round(state.z / period);
+    for (const { texture, length } of roadRoot.userData.surfaceTextures) {
+      const offset = (-roadRoot.position.z * texture.repeat.y / length) % 1;
+      texture.offset.y = offset < 0 ? offset + 1 : offset;
+    }
   }
 
   /** Recycle scenery that the car has driven past to one span ahead. */
@@ -893,9 +991,23 @@ function createSimulation(canvas, hooks) {
   }
 
   function updateCamera() {
-    const pose = cameraPose(state.x, state.z, state.heading);
-    camera.position.set(pose.position.x, pose.position.y, pose.position.z);
-    camera.lookAt(pose.lookAt.x, pose.lookAt.y, pose.lookAt.z);
+    const pose = cameraPose(state.x, state.z, state.heading, {
+      eyeHeight: appearance.cameraEyeHeight,
+    });
+    const sinH = Math.sin(state.heading);
+    const cosH = Math.cos(state.heading);
+    const lookAhead = CAMERA_LOOK_AHEAD_M;
+    camera.position.set(
+      pose.position.x + appearance.cameraOffsetX * cosH,
+      pose.position.y,
+      pose.position.z + appearance.cameraOffsetX * sinH,
+    );
+    camera.lookAt(
+      pose.lookAt.x + Math.tan(appearance.cameraYawRadians) * lookAhead * cosH,
+      pose.lookAt.y + Math.tan(appearance.cameraPitchRadians) * lookAhead,
+      pose.lookAt.z + Math.tan(appearance.cameraYawRadians) * lookAhead * sinH,
+    );
+    camera.rotateZ(appearance.cameraRollRadians);
   }
 
   /**
@@ -1100,6 +1212,10 @@ function createSimulation(canvas, hooks) {
     scene,
     camera,
     renderer,
+    domainProfile: appearance,
+    dispose() {
+      renderer.dispose();
+    },
   };
 }
 

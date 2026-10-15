@@ -14,6 +14,7 @@
 | [8](#8-troubleshooting) | Troubleshooting |
 | [9](#9-tests) | Tests |
 | [10](#10-results-and-limitations) | Results and limitations |
+| [11](#11-stage-2-training-candidate) | Stage 2 training candidate and offline evaluation |
 
 ## 1. Introduction
 
@@ -59,8 +60,8 @@ network.
   `sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt install python3.11 python3.11-venv`.
 - **Redis 6+** — the Channels layer that fans frames out between the WebSocket consumers.
 - **A modern browser** — Chrome/Edge (PC and phone), Firefox, Safari 16+.
-- **Node.js 20+** *(optional)* — only for the frontend test suite and rebuilding the Tailwind
-  stylesheet.
+- **Node.js 20.11+** *(optional)* — for the frontend test suite, dataset collection, and rebuilding
+  the Tailwind stylesheet.
 - **For the model pipeline only:** Linux/macOS (TensorFlow has no Windows wheels; use WSL2 on
   Windows).
 
@@ -584,6 +585,59 @@ committed by accident.
 | `models/parity/` | Export Keras outputs and compare them with the converted model in TensorFlow.js |
 | `models/tests/` | The above, on stand-ins that run in seconds |
 
+### 7.5 Local simulator dataset
+
+The current converted DAVE-2-GRU checkpoint is unchanged. A separate collector now renders
+seeded episodes of this Three.js scene and records the scripted driver's four commands beside
+each frame. The policy follows a lane, signals before choosing a clear adjacent lane around
+oncoming traffic, and brakes when none is clear. Each episode starts with a random cruise target
+of `10–15 m/s`; oncoming cars are attempted every `0.8–1.5 s`, `55–115 m` ahead, at `9–21 m/s`.
+The policy considers a lane clear when its nearest oncoming car is at least `92 m` away, begins
+a maneuver when the current-lane gap is within `105 m`, signals for `0.45 s` before steering,
+and brakes below a `72 m` gap when no maneuver can be made. These are scripted scenario
+assumptions, not a validated road-safety controller. Collision and wall-contact frames are
+marked invalid in the manifest and excluded by camera augmentation.
+
+Run from `selfdriving_sim/` after `npm ci`:
+
+```bash
+npm run dataset:collect -- --frames 512 --episode-frames 512 --seed 3001 \
+  --output models/data/pilot-512
+
+python -m venv .venv
+.venv/bin/pip install -r requirements-data.txt
+.venv/bin/python models/augment_dataset.py \
+  --input models/data/pilot-512 \
+  --output models/data/pilot-512-camera \
+  --seed 91
+```
+
+For a 5,000-frame run, use `--frames 5000 --episode-frames 500` and a new output directory.
+The collector uses a seeded headless Chromium/WebGL render; `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`
+can select a locally installed browser. Each raw frame is a `640 × 360` JPEG. `manifest.jsonl`
+contains relative image paths, `steering`, `throttle`, `brake`, `turn_signal`, simulator state
+and a `valid` flag; `metadata.json` records seeds, browser versions, appearance profiles and
+label counts. Data
+is written under `models/data/`, which is gitignored. A 5,000-frame run with seed `20261014` produced 4,699 valid camera views
+(301 collision/wall-contact frames excluded). After horizontal reflection, labels were `2,468`
+signal-off, `1,107` left, `1,124` right and `828` brake-positive. This is a generated training
+candidate, not a held-out validation set or a guarantee of real-world coverage.
+
+Each episode randomizes sky, ground and asphalt colours, lane-marking colour and dash spacing,
+procedural surface texture, scenery, light intensity, and the simulated vehicle-camera mount:
+FOV `54–70°`, eye height `0.63–0.91 m`, yaw ±`1.3°`, pitch ±`2.0°`, roll ±`1.0°`. The Python
+step projects the rendered image onto a perspective-skewed 16:9 monitor inside a 4:3
+`160 × 120` phone frame, then varies exposure, colour, glare, sensor noise, blur and JPEG
+quality. Some views are horizontally reflected; their steering, turn-signal and lateral-state
+labels are reflected with them.
+
+This is a software camera approximation, not a camera recording: it does not reproduce the
+actual display refresh, room, HUD, screen moiré or a particular phone lens. Calibrate the
+monitor's size in the phone frame and camera mount again before using the same assumptions for
+an RC model or a real vehicle. Review `metadata.json` label counts before training, especially
+the positive brake and left/right signal counts. The Pi generation is not yet selected, so no
+on-device TFLite latency is claimed.
+
 ## 8. Troubleshooting
 
 Before anything else run `python manage.py check` and make sure `redis-cli ping` answers
@@ -803,11 +857,12 @@ run can fill them.
 
 | Test suite | Result | Note |
 |---|---|---|
-| `pytest simulation client` | **48 passed, 2 skipped** | the skips are only the Redis tests, with no service reachable |
-| `npm test` (Node) | **94 passed, 0 failed** | scene (physics, wall, blinker, collisions, camera), inference, custom GRU, model contract |
-| `pytest models` | with the ML environment | checkpoint pins, graph restructuring, the four heads, conversion and parity |
-| WebSocket smoke test against a live server | all pass | command, telemetry, both hazards, a rejected hazard kind, a malformed command |
-| HTTP and static-asset smoke test | all `200` | `/`, `/dashboard/`, `scene.js`, `three.module.min.js`, `inference.js`, `model.json`, CSS |
+| `python manage.py check` | **passed** | no system-check issues |
+| `pytest simulation client models` (excluding four converter/parity tests) | **110 passed, 2 skipped, 4 deselected** | skips are Redis tests; deselected tests require `tensorflowjs_converter` |
+| Unfiltered `pytest -q` | **not green: 110 passed, 2 skipped, 2 failed, 2 errors** | all four failures/errors are converter/parity fixtures blocked because `tensorflowjs_converter` is absent; it was intentionally not installed because conversion/export is outside this stage's scope, and no conversion completed |
+| `npm test` (Node) | **101 passed, 0 failed** | scene and controller, domain randomization, dataset-label policy, inference, custom GRU, model contract |
+| WebSocket smoke test against a live server | all pass in the earlier Stage 1 check | command, telemetry, both hazards, a rejected hazard kind, a malformed command |
+| HTTP and static-asset smoke test | all `200` in the earlier Stage 1 check | `/`, `/dashboard/`, `scene.js`, `three.module.min.js`, `inference.js`, `model.json`, CSS |
 | Playwright | not run | no Chromium in the test environment; on your machine: `npx playwright install chromium && npm run test:browser` |
 
 ### 10.2 The DAVE-2-GRU model
@@ -863,11 +918,13 @@ loop.
 
 ### 10.5 Known limitations
 
-- The `brake` and `turn_signal` heads are neutral (no training data); the model neither brakes
-  nor signals, and the turn signals are exercised by the Mock only.
-- Sim-to-real gap: the model was trained on simulator images and here watches an emitted
-  screen; refresh rate, glare, viewing angle and camera noise are not in the training
-  distribution.
+- The existing browser DAVE-2-GRU checkpoint was not replaced. The new Stage 2 candidate is
+  a separate offline artifact and misses every held-out positive-brake example at a 0.1
+  threshold; it must not be used for closed-loop control.
+- The Stage 2 model learned from a synthetic scripted policy and rendered monitor images. It
+  has not been validated on a physical camera, a Raspberry Pi, an RC car or a real vehicle.
+- Sim-to-real gap: refresh rate, glare, viewing angle, camera noise and physical mounting
+  differences remain imperfectly represented.
 - The physics is simple kinematics — no tyre slip, weight transfer or real lateral dynamics.
 - One straight, endless road with oncoming traffic only; no intersections, traffic lights,
   pedestrians or lane curvature.
@@ -876,10 +933,101 @@ loop.
 
 ### 10.6 Suggested next steps
 
-1. Run the protocol in 10.3 and flip `STEERING_SIGN` if the real model needs it.
-2. Record a dataset from the simulator itself and fine-tune the brake/turn-signal heads.
-3. A curved road with varied curvature, to measure steering for real.
-4. A latency instrumentation overlay (p50/p95 of the chain in the HUD) for targeted tuning.
+1. Improve braking scenarios and collect more held-out positive-brake examples, then retrain
+   until braking recall is demonstrably useful on unseen episodes.
+2. Add curved roads and controlled lane-change scenarios before expanding the controller's
+   behavior.
+3. Repeat episode-level evaluation across several independent splits and report uncertainty.
+4. Only after offline criteria are met, request approval for conversion and a separate
+   browser-model integration stage.
+5. Run the physical-phone protocol in 10.3 and measure latency; do not infer Raspberry Pi or
+   vehicle performance from this CPU training run.
+
+## 11. Stage 2 training candidate and offline evaluation
+
+Stage 2 adds a compact four-output model, episode-level data loading/splitting, a CPU training
+script and held-out evaluation. The training capture was aligned so each camera image and its
+expert label refer to the **same pre-action simulator state**. Sequences do not cross invalid
+frame gaps or episode/view boundaries, and validation episodes are never used for gradient
+updates.
+
+### 11.1 Reproduce the run
+
+Generated data and checkpoints are written under the ignored `models/data/` directory.
+Install the optional training dependencies separately from the web runtime:
+
+```bash
+source .venv/bin/activate
+pip install -r requirements.txt -r requirements-data.txt -r requirements-training.txt
+npm ci
+
+node models/collect_dataset.mjs \
+  --frames 5000 --episode-frames 100 --seed 20261014 \
+  --output models/data/selfdrivesim-stage2-aligned-5000-50ep
+
+python models/augment_dataset.py \
+  --input models/data/selfdrivesim-stage2-aligned-5000-50ep \
+  --output models/data/selfdrivesim-stage2-aligned-5000-50ep-camera \
+  --views 2 --seed 20261014
+
+python -m models.train_controller \
+  --dataset models/data/selfdrivesim-stage2-aligned-5000-50ep-camera \
+  --output models/data/controller-stage2-run \
+  --epochs 50 --batch-size 32 --patience 10 --validation-fraction 0.2 \
+  --learning-rate 0.0003 --monitor val_steering_mae --seed 20261014 --threads 2
+```
+
+The training command refuses to overwrite an existing output directory. The report, CSV/JSON
+history and training-only HDF5 checkpoint remain in that run directory; generated data and
+weights are ignored by Git. The browser model directory is not an output target.
+
+### 11.2 Data and model
+
+| Item | Result |
+|---|---|
+| Raw capture | 5,000 frames in 50 seeded 100-frame episodes; 4,977 valid and 23 excluded after collision/wall events |
+| Camera views | 2 per valid source frame; 9,954 160×120 RGB images with episode/view-consistent camera profiles |
+| Contiguous three-frame windows | 9,754 total; 7,794 training and 1,960 validation windows |
+| Split | 40 training episodes and 10 disjoint validation episodes; seed `20261014` |
+| Training-window labels | signals off/left/right 4,374/1,431/1,989; 236 brake-positive; 2,136 steering maneuvers |
+| Validation-window labels | signals off/left/right 1,098/367/495; 58 brake-positive; 546 steering maneuvers |
+| Input | three raw RGB frames, `(3, 120, 160, 3)`, pixels 0–255; normalization is inside the model |
+| Architecture | temporal channel stack → separable convolutional network → named steering, throttle, brake and turn-signal heads |
+| Size | 93,550 parameters; saved HDF5 candidate 1,265,472 bytes |
+
+### 11.3 Held-out metrics
+
+The selected checkpoint was the best `val_steering_mae` checkpoint (epoch 42 of 50), trained
+on CPU with TensorFlow/tf-keras 2.15.1 and two threads. Elapsed fit time was 1,981 seconds.
+The comparator is a label-only baseline: training-set means for regression heads and the
+training-set majority class for turn signals.
+
+| Head / metric | Candidate | Constant baseline | Interpretation |
+|---|---:|---:|---|
+| Steering MAE | 0.1638 | 0.1748 | Better on these held-out episodes |
+| Steering maneuver MAE (`|target| > 0.2`) | 0.3507 (546 samples) | 0.5434 | Better, but not a driving-safety metric |
+| Throttle MAE | 0.1341 | 0.1481 | Better on these held-out episodes |
+| Brake regression MAE | 0.0486 | 0.0528 | Lower aggregate error is misleading for the sparse event class |
+| Brake event recall at output threshold 0.1 | **0 / 58 (0%)** | 0 / 58 (0%) | **Failed: the candidate detected no held-out positive-brake window** |
+| Brake positive-event F1 at threshold 0.1 | **0.000** | 0.000 | No demonstrated braking detection |
+| Turn-signal accuracy | 76.8% | 56.0% | Better than majority-class prediction |
+| Turn-signal macro F1 | 71.7% | 23.9% | Includes off, left and right classes |
+
+At a lower brake-output threshold of 0.02, recall rises only to 1/58 (1.7%) while precision
+is 0.31% and 16.5% of validation windows are flagged. This is still not useful event
+detection.
+
+**Decision:** the offline baseline screen is **not passed**, because the brake-event recall did
+not improve over the zero-event baseline at the stated 0.1 threshold. The candidate is a
+training/evaluation artifact, not an accepted controller. Do not use the regression MAE alone
+to conclude braking works; its low value is largely driven by the many zero-brake frames.
+
+### 11.4 Scope boundary
+
+No TFLite or TensorFlow.js export was run. No existing checkpoint, browser asset or
+`client/static/client/js/inference.js` contract was changed. The browser continues to use the
+pre-existing DAVE-2-GRU model. The new HDF5 file is a separate, ignored training candidate;
+it has not been tested in the simulator's closed loop or on embedded/vehicle hardware.
 
 ## License
 

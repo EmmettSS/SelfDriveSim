@@ -5,16 +5,19 @@
   "type": "module",
   "description": "Local styles and browser tests for the mobile simulation dashboard",
   "engines": {
-    "node": ">=20"
+    "node": ">=20.11.0"
   },
   "scripts": {
     "build:css": "tailwindcss -i client/styles/dashboard.css -o client/static/client/css/dashboard.css --minify",
     "watch:css": "tailwindcss -i client/styles/dashboard.css -o client/static/client/css/dashboard.css --watch",
     "test": "node --test simulation/tests/js/*.test.mjs client/tests/js/*.test.mjs",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "dataset:collect": "node models/collect_dataset.mjs",
+    "dataset:augment": "python models/augment_dataset.py"
   },
   "devDependencies": {
     "@playwright/test": "1.64.0",
+    "@sparticuz/chromium": "147.0.0",
     "@tailwindcss/cli": "4.3.0",
     "@tensorflow/tfjs": "4.22.0",
     "tailwindcss": "4.3.0"
