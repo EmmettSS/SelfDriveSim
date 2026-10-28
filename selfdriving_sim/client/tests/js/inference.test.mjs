@@ -19,7 +19,12 @@ import {
   nextReconnectDelayMs,
   parseHazard,
 } from "../../static/client/js/inference.js";
-import { FakeStream, connected, harness } from "./harness.mjs";
+import {
+  FakeStream,
+  connected,
+  harness,
+} from "./harness.mjs";
+import { MonitorTracker } from "../../static/client/js/monitor.js";
 
 test("Mock signals stay within the four-field protocol over a full minute", () => {
   for (let tick = 0; tick < 1200; tick += 1) {
@@ -454,3 +459,122 @@ test("every hazard kind has a Persian warning for the banner", () => {
     assert.ok(HAZARD_MESSAGES[kind].length > 5);
   }
 });
+
+/* --------------------------- monitor auto lock --------------------------- */
+
+/** Four settled samples of one steady screen position lock the tracker. */
+function lockTracker(tracker, rect) {
+  for (let i = 0; i < 4; i += 1) tracker.observe(rect);
+  assert.equal(tracker.locked, true);
+  return rect;
+}
+
+test("a locked monitor crops the capture to the screen region", async () => {
+  const h = await connected();
+  const video = h.ui["camera-feed"];
+  const rect = lockTracker(h.controller.tracker, { x0: 0.25, y0: 0.5, x1: 0.75, y1: 1 });
+  assert.equal(h.controller.captureFrame(), true);
+  const [source, sx, sy, sw, sh, dx, dy, dw, dh] = h.ui["process-canvas"].draws.at(-1);
+  assert.equal(source, video, "drawImage reads the camera, not a copy");
+  assert.deepEqual(
+    [sx, sy, sw, sh, dx, dy, dw, dh],
+    [rect.x0 * 1280, rect.y0 * 720, (rect.x1 - rect.x0) * 1280, (rect.y1 - rect.y0) * 720, 0, 0, FRAME_WIDTH, FRAME_HEIGHT],
+  );
+});
+
+test("with no lock, capture stays the full frame", async () => {
+  const h = await connected();
+  lockTracker(h.controller.tracker, { x0: 0.25, y0: 0.5, x1: 0.75, y1: 1 });
+  // An estimate that has not settled yet is deliberately not trusted.
+  h.controller.tracker.reset();
+  assert.equal(h.controller.captureFrame(), true);
+  assert.deepEqual(h.ui["process-canvas"].draws.at(-1).slice(1), [0, 0, FRAME_WIDTH, FRAME_HEIGHT]);
+});
+
+test("turning the auto lock off clears the estimate, overlay and status", async () => {
+  const h = await connected();
+  const rect = lockTracker(h.controller.tracker, { x0: 0.25, y0: 0.5, x1: 0.75, y1: 1 });
+  assert.equal(h.controller.captureFrame(), true, "cropped while locked");
+  assert.equal(h.ui["process-canvas"].draws.at(-1)[1], rect.x0 * 1280, "source X moved to the screen's left edge");
+
+  h.controller.setScreenLock(false);
+  assert.equal(h.ui["btn-screen-lock"].attributes["aria-pressed"], "false");
+  assert.equal(h.ui["btn-screen-lock"].textContent, "قفل خودکار: خاموش");
+  assert.match(h.ui["lock-status"].textContent, /خاموش/);
+  assert.deepEqual(h.controller.tracker.rect, null, "estimate forgotten");
+  assert.equal(h.controller.captureFrame(), true);
+  assert.deepEqual(h.ui["process-canvas"].draws.at(-1).slice(1), [0, 0, FRAME_WIDTH, FRAME_HEIGHT], "full frame while off");
+
+  // Even a newly locked estimate must stay ignored while the lock is off.
+  lockTracker(h.controller.tracker, { x0: 0.25, y0: 0.5, x1: 0.75, y1: 1 });
+  assert.equal(h.controller.captureFrame(), true);
+  assert.deepEqual(h.ui["process-canvas"].draws.at(-1).slice(1), [0, 0, FRAME_WIDTH, FRAME_HEIGHT]);
+});
+
+test("the toggle re-enables tracking from scratch", async () => {
+  const h = await connected();
+  h.controller.setScreenLock(false);
+  h.controller.setScreenLock(true);
+  assert.equal(h.ui["btn-screen-lock"].attributes["aria-pressed"], "true");
+  assert.match(h.ui["lock-status"].textContent, /جست‌وجو/);
+  assert.equal(h.controller.screenTimer !== null, false, "test fakes have no sampler, so no interval");
+});
+
+test("manual crop button toggles manual mode and initializes locked rect", async () => {
+  const h = await connected();
+  assert.equal(h.controller.manualCropMode, false);
+
+  h.controller.toggleManualCrop(true);
+  assert.equal(h.controller.manualCropMode, true);
+  assert.equal(h.ui["btn-manual-crop"].attributes["aria-pressed"], "true");
+  assert.equal(h.controller.tracker.locked, true);
+  assert.ok(h.controller.tracker.rect !== null);
+
+  h.controller.toggleManualCrop(false);
+  assert.equal(h.controller.manualCropMode, false);
+  assert.equal(h.ui["btn-manual-crop"].attributes["aria-pressed"], "false");
+});
+
+test("manual crop pointer dragging adjusts crop boundary handles and updates captureFrame", async () => {
+  const h = await connected();
+  h.controller.toggleManualCrop(true);
+  h.controller.tracker.rect = { x0: 0.2, y0: 0.2, x1: 0.8, y1: 0.8 };
+
+  const overlay = h.ui["screen-overlay"];
+  overlay.clientWidth = 640;
+  overlay.clientHeight = 360;
+  overlay.getBoundingClientRect = () => ({ left: 0, top: 0, width: 640, height: 360 });
+
+  const handles = h.controller.getOverlayHandles(640, 360);
+  assert.ok(handles.length >= 6);
+  const brHandle = handles.find(handle => handle.id === "br");
+  assert.ok(brHandle);
+
+  // Pointer down near bottom-right handle
+  h.controller.handleOverlayPointerDown({
+    clientX: brHandle.x,
+    clientY: brHandle.y,
+    pointerId: 1,
+    preventDefault() {},
+  });
+  assert.equal(h.controller.activeDragHandle, "br");
+
+  // Drag bottom-right outward
+  h.controller.handleOverlayPointerMove({
+    clientX: brHandle.x + 30,
+    clientY: brHandle.y + 20,
+    pointerId: 1,
+    preventDefault() {},
+  });
+  assert.ok(h.controller.tracker.rect.x1 > 0.8);
+  assert.ok(h.controller.tracker.rect.y1 > 0.8);
+
+  h.controller.handleOverlayPointerUp({ pointerId: 1 });
+  assert.equal(h.controller.activeDragHandle, null);
+
+  // Verify captureFrame crops to the manually adjusted rect
+  assert.equal(h.controller.captureFrame(), true);
+  const draws = h.ui["process-canvas"].draws.at(-1);
+  assert.equal(draws[1], Math.round(h.controller.tracker.rect.x0 * 1280));
+});
+

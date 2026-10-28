@@ -35,11 +35,40 @@ def test_scene_page_has_the_hud_elements(client):
         assert f'id="{element_id}"' in content
 
 
+def test_scene_page_carries_the_screen_lock(client):
+    """The fullscreen lock button ships in the legend, wired by inline JS."""
+    content = client.get("/").content.decode()
+
+    assert 'id="screen-lock"' in content
+    assert "fullscreenchange" in content  # label sync + backbuffer refit
+
+
 def test_scene_page_loads_the_module_scripts(client):
     content = client.get("/").content.decode()
 
     assert "/static/simulation/js/scene.js" in content
     assert 'type="module"' in content
+
+
+def test_scene_page_carries_the_phone_qr_panel(client):
+    """The QR panel ships even when the QR library is missing: URL text only."""
+
+    content = client.get("/").content.decode()
+
+    assert 'id="qr-panel" hidden' in content
+    assert 'id="qr-toggle"' in content
+    assert 'id="qr-url"' in content
+    assert "/dashboard/" in content  # the URL the phone has to visit
+
+
+def test_scene_page_honours_the_dashboard_url_override(client, monkeypatch):
+    """SIMULATION_DASHBOARD_URL wins over the automatic LAN detection."""
+
+    monkeypatch.setenv("SIMULATION_DASHBOARD_URL", "https://10.9.8.7:9443/dashboard/")
+
+    content = client.get("/").content.decode()
+
+    assert "https://10.9.8.7:9443/dashboard/" in content
 
 
 def test_every_static_asset_the_page_refers_to_exists():

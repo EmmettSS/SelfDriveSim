@@ -13,8 +13,10 @@ cd /d "%~dp0.."
 
 rem --- configuration ------------------------------------------
 if "%PORT%"=="" set PORT=8000
+if "%TLS_PORT%"=="" set TLS_PORT=8443
 if "%REDIS_HOST%"=="" set REDIS_HOST=127.0.0.1
 if "%REDIS_PORT%"=="" set REDIS_PORT=6379
+set "SIMULATION_TLS_PORT=%TLS_PORT%"
 
 rem --- interpreter: prefer the local virtualenv ----------------
 if exist ".venv\Scripts\python.exe" (
@@ -71,21 +73,21 @@ if not defined LAN_IP set "LAN_IP=<LAN-IP>"
 
 echo.
 echo     PC renderer (fullscreen):   http://localhost:%PORT%/
-echo     Phone:                      http://%LAN_IP%:%PORT%/dashboard/
-echo                                 (with the Chrome flag, guide in docs/)
+echo     Phone dashboard:            https://%LAN_IP%:%TLS_PORT%/dashboard/
 echo.
-echo     One-time phone setup - same Wi-Fi, then in Chrome on the phone:
-echo       chrome://flags/#unsafely-treat-insecure-origin-as-secure  -^>  Enabled
-echo       add  http://%LAN_IP%:%PORT%  -^>  Relaunch
-echo       then open  http://%LAN_IP%:%PORT%/dashboard/
+echo     Phone setup - scan the QR code shown on the monitor page, same Wi-Fi,
+echo       then accept the one-time self-signed certificate warning:
+echo         Android Chrome:  Advanced -^> Proceed to <IP>
+echo         iOS Safari:      Show Details -^> visit this website
+echo     HTTPS on port %TLS_PORT% is what makes the camera work on Android and iOS.
 echo     Guide: docs\guide.fa.md (fa) - docs\guide.en.md (en)
 echo.
 echo     Keyboard fallback drives the car when no phone command arrives.
 echo.
 
 rem --- 5. serve ------------------------------------------------
-echo ==^> Starting Daphne on 0.0.0.0:%PORT% (Ctrl+C to stop) ...
-%PY% -m daphne -b 0.0.0.0 -p %PORT% selfdriving_sim.asgi:application
+echo ==^> Serving on 0.0.0.0:%PORT% (http) and 0.0.0.0:%TLS_PORT% (https) - Ctrl+C to stop ...
+%PY% manage.py runsecure %PORT%
 goto :eof
 
 :failed

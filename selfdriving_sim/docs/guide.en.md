@@ -7,7 +7,7 @@
 | [1](#1-introduction) | Introduction |
 | [2](#2-requirements) | Requirements |
 | [3](#3-setup-and-running) | Setup and running |
-| [4](#4-connecting-the-phone-with-the-chrome-flag) | Connecting the phone (Chrome flag) |
+| [4](#4-connecting-the-phone-https--qr-code-android-and-ios) | Connecting the phone (HTTPS + QR) |
 | [5](#5-architecture-and-the-websocket-protocol) | Architecture and the WebSocket protocol |
 | [6](#6-scene-physics-and-hud) | Scene physics and HUD |
 | [7](#7-the-dave-2-gru-model-and-the-conversion-pipeline) | The DAVE-2-GRU model and the conversion pipeline |
@@ -156,67 +156,85 @@ SelfDriveSim/
         └── guide.en.md          this document
 ```
 
-## 4. Connecting the phone with the Chrome flag
+## 4. Connecting the phone: HTTPS + QR code (Android and iOS)
 
-Browsers only grant camera access in a **secure context**: `https://` or `http://localhost`.
-`http://<other-ip>:8000` on the phone does not give camera access by default. The official
-route of this project is the Chrome flag: no internet tunnel, no third-party service, and
-camera frames plus commands stay entirely on the local network.
+Browsers only grant camera access in a **secure context**: `https://` or
+`http://localhost`. `http://<other-ip>:8000` on the phone does not get camera
+access — at all on iOS. The official route of this project is therefore the
+built-in dev HTTPS server + QR code: `runsecure` listens on plain HTTP for the
+PC and on HTTPS (default port 8443) with an auto-generated self-signed
+certificate. Nothing leaves the local network; no Chrome flags, no third-party
+proxy.
 
 ### 4.1 Step by step
 
-1. **Both devices on the same Wi-Fi.** Find the PC's local IP address:
-   - Linux/macOS: `hostname -I` (the first address that is not `127.0.0.1`)
-   - Windows: `ipconfig` (the `IPv4 Address` of the Wi-Fi adapter)
-
-   Example: `192.168.1.42`. Make sure the phone and the PC are on the same network and that
-   "AP isolation" is off.
-
-2. **Start the server on every interface** (with `runserver`, which serves the static files):
+1. **Start the server:**
 
    ```bash
-   python manage.py runserver 0.0.0.0:8000
+   python manage.py runsecure
    ```
 
-3. **Enable the flag in Chrome on the phone.** Open in the phone's address bar:
+   The first start generates a self-signed certificate into `certs/` and covers
+   `localhost`, the PC's hostname and every LAN address it can find. Printout
+   shows the phone URL, e.g. `https://192.168.1.42:8443/dashboard/` (port
+   change: `--tls-port`, or `TLS_PORT=…` in `scripts/run.sh`/`run.bat`).
 
-   ```
+2. **Scan the QR on the monitor page.** Open the scene on the PC
+   (`http://localhost:8000/`) and press the «داشبورد گوشی (QR)» button in the
+   bottom-right corner. Scan the QR with the phone camera (Android and iOS
+   both open the URL), with both devices on the same Wi-Fi and "AP isolation"
+   off. The panel also plain-texts the URL, and it auto-hides so the phone
+   camera keeps seeing clean scene visuals.
+
+3. **Accept the one-time certificate warning.** The certificate is self-signed,
+   so every browser asks once:
+   - **Android / Chrome:** tap *Advanced* → *Proceed to <IP>*.
+   - **iOS / Safari:** tap *Show Details* → *visit this website*. iOS accepts
+     the camera only through HTTPS and *only after visiting once*, which is why
+     the Chrome flag never worked on iPhone.
+
+4. **Allow the camera, frame the monitor, start.** Tap **Allow** for the
+   camera, place the phone on a stand facing the monitor, then press **شروع
+   خودران** (start self-driving). The connection indicator must turn green and
+   the send rate should approach 20 FPS. On the PC, press the **تمام‌صفحه**
+   button (bottom-right of the HUD) — or F11 — to lock the scene onto the whole
+   screen; the canvas re-fits itself automatically after zoom changes, moving
+   the window between monitors, and fullscreen transitions.
+
+5. **Troubleshooting this route**
+   - **QR does not open**: the phone and the PC are on different networks, or
+     "AP isolation" is on (common on guest routers). Use the main network, or
+     the phone's own **hotspot** joined by the PC (the QR regenerates for the
+     new address on refresh).
+   - **Windows firewall**: the first Python run asks for network access; if it
+     was denied, add inbound rules for TCP 8000 **and** TCP 8443 in Windows
+     Defender Firewall.
+   - **Port 8443 taken**: start with `--tls-port <other-port>`; the QR adapts.
+   - **Wrong LAN picked** (VPN, Hyper-V): set the exact address with
+     `SIMULATION_DASHBOARD_URL`, or the whole URL of the dashboard, in `.env` /
+     the environment — the QR and the URL text follow it.
+   - **Camera still blocked after accepting**: iOS needs the visit once before
+     granting; reload the page after the warning, then allow the camera. If you
+     once denied the camera for this origin, reset it in the site settings
+     (the 🔒 icon next to the address).
+   - If a strict environment rules out the TLS route entirely, the legacy
+     Chrome-flag route still works on **Android only**; see the appendix.
+
+6. **Appendix — the legacy Chrome flag (Android only):** for completeness, the
+   old route without any HTTPS. Chrome can mark a plain-HTTP origin as secure
+   via the flag `unsafely-treat-insecure-origin-as-secure`:
+
+   ```text
    chrome://flags/#unsafely-treat-insecure-origin-as-secure
    ```
 
-   - Set it to **Enabled**.
-   - In the text box, type **exactly** your own origin:
-     `http://192.168.1.42:8000` (with the port, without `/dashboard/`, without a trailing
-     slash).
-   - Press **Relaunch** so Chrome restarts. (If there is no button, fully close Chrome and
-     open it again.)
+   Set it to Enabled, type the origin **exactly** — `http://192.168.1.42:8000`
+   (with the port, without `/dashboard/`, without a trailing slash) — and
+   relaunch. Chrome forgets it after major updates. **iOS cannot use this**;
+   Safari has no equivalent flag, which is the reason the HTTPS route above is
+   the official one.
 
-4. **Open the dashboard.** In Chrome on the phone:
-
-   ```
-   http://192.168.1.42:8000/dashboard/
-   ```
-
-   Tap **Allow** for the camera, place the phone on a stand facing the monitor, then press
-   **شروع خودران** (start self-driving). The connection indicator must turn green and the
-   send rate should approach 20 FPS. Keep `/` fullscreen (F11) on the PC.
-
-5. **Troubleshooting this route**
-   - Chrome resets its flag list after major updates. If «اتصال امن لازم است» (secure
-     connection required) comes back, repeat step 3.
-   - **AP isolation** is common on guest routers: the phone cannot see the PC. Alternatives:
-     the main network without isolation, or the **phone's own hotspot** with the PC joined to
-     it (then read the new IP with `hostname -I`/`ipconfig` and update the flag for that
-     address).
-   - **Windows firewall** for port 8000: the first Python run asks for network access; if it
-     was denied, add an inbound rule for TCP 8000 in Windows Defender Firewall.
-   - **iOS does not have this flag.** Safari on iPhone cannot mark an insecure origin as
-     secure; use the appendix below for iOS.
-   - If the flag seems to do nothing, check the order: Enabled → address in the box →
-     Relaunch → then open the dashboard. A tab opened before the relaunch does not see the
-     flag.
-
-6. **Appendix — the permanent route (and iOS):** a local reverse proxy with an internal
+7. **Appendix — the permanent route:** a local reverse proxy with an internal
    certificate, without any external service. With [Caddy](https://caddyserver.com/), a
    `Caddyfile`:
 
@@ -253,6 +271,18 @@ built from `location.host`; the code holds no `localhost` or fixed IP. Nothing i
 - Inbound telemetry updates the speed readout; inbound hazard frames raise a red four-second
   banner («برخورد با دیوار — مسیر را عوض کن»). `parseHazard` accepts only `collision` and
   `wall`.
+- **Monitor auto-lock.** While the camera runs, the dashboard samples a 64×48 luminance grid
+  every 400 ms (`monitor.js`, pure and Node-tested) and looks for one bright rectangle in the
+  room: the PC screen. When the same position repeats for a few samples the estimate locks, a
+  yellow border is drawn on a full-viewport overlay canvas (everything outside it is dimmed)
+  and the status line reads «مانیتور قفل شد · ~NN% قاب». From then on `captureFrame` crops the
+  video to the monitor, so the model input contains the road only instead of desk, ceiling and
+  screen at once. Detection rejects rectangles that are too small (glare) or cover the whole
+  frame (a bright wall or daylight window). The **قفل خودکار** toggle under the camera window
+  switches the whole feature off (full-frame capture, border cleared) or retries it. If the
+  phone drifts by more than a few percent, the lock re-arms instead of sticking to a stale
+  border. Statuses: «در جست‌وجوی مانیتور…» → «مانیتور پیدا شد · تثبیت…» → «مانیتور قفل شد ·
+  ~NN% قاب»; off reads «قفل خودکار خاموش».
 - A camera failure, a frame-capture error, a server error reply, a dropped connection or more
   than 1024 buffered bytes (`bufferedAmount`) stops the send loop.
 - Socket reconnection backs off 0.5, 1, 2, 4, 8, then up to 15 seconds; each handshake is
@@ -619,8 +649,8 @@ or «اتصال امن لازم است».
 **Root cause:** `getUserMedia` only works in a secure context. `http://192.168.x.x:8000` gives
 no camera on purpose.
 
-**Fix:** the steps in [section 4](#4-connecting-the-phone-with-the-chrome-flag) — the Chrome
-flag on Android, or the Caddy local HTTPS for iOS and for a permanent setup. If you once
+**Fix:** the steps in [section 4](#4-connecting-the-phone-https--qr-code-android-and-ios) —
+`runsecure` plus the QR code works on Android and iOS. Debugging leftovers: if you once
 tapped Reject: the 🔒 menu next to the address ← Permissions ← Camera ← Allow, then reload. On
 iOS permissions are also controlled in Settings › Safari › Camera, and the page must be
 opened directly in the browser, not inside a messenger app. Make sure the **rear** camera is
@@ -634,6 +664,7 @@ active; the dashboard asks for `facingMode: environment`.
 | Image but a red WebSocket | Check Redis, the Django terminal and `/ws/control/`; it must be ASGI/Daphne, not WSGI. |
 | Page without styling | Use `runserver` in development; standalone Daphne does not serve staticfiles. |
 | No image in an iframe | Open the URL directly in Chrome; camera permission in an iframe also depends on the host's policy. |
+| «در جست‌وجوی مانیتور…» never locks, or locks on the wrong thing | The detector needs one bright screen against a darker room: raise the monitor brightness, reduce daylight behind the phone, keep the screen filling roughly 15–95% of the view once the border appears, or turn the feature off with **قفل خودکار**. |
 
 ### 8.3 The WebSocket keeps dropping
 
@@ -735,9 +766,15 @@ npm run test:browser               # Chromium with a synthetic camera + the real
   clear reason.
 - The scene Node tests cover the pure helpers: spawn scheduling, the traffic pool limit,
   command sanitising, the speed and steering model, road snapping, the reconnect backoff, the
-  wall, the blinker, collisions and the camera.
+  wall, the blinker, collisions, the camera, and the screen-fit viewport maths.
+- `client/tests/js/monitor.test.mjs` covers the monitor detector itself: the BT.601 luminance
+  grid, the bright-rectangle finding (and its rejections: all-dark, all-bright, glare, too
+  narrow), the object-fit cover mapping, the exponential smoothing, the deltas and the
+  tracker's lock/release/reset state machine.
 - The mobile Node tests cover camera permission and cleanup, Mock ranges, the send-rate
   counter, indicators, start/stop, WSS URLs, socket reconnection, late media results,
+  backpressure, the frame window, tensor handling, the model contract, the clamped command,
+  the dashboard's model path, the Mock fallback and the monitor crop of the model input.
   backpressure, the frame window, tensor handling, the model contract, the clamped command,
   the dashboard's model path and the Mock fallback. `client/tests/js/reset-after-gru.test.mjs`
   checks the browser GRU against Keras reference values in
@@ -760,12 +797,15 @@ Server and scene:
 
 Phone:
 
-- [ ] Both devices on one Wi-Fi; the IP came from `hostname -I` or `ipconfig`.
-- [ ] The `unsafely-treat-insecure-origin-as-secure` flag is enabled with exactly
-      `http://<IP>:8000` and Chrome was relaunched.
+- [ ] Both devices on one Wi-Fi; the QR on the monitor page opens the HTTPS dashboard
+      (`https://<IP>:8443/dashboard/` from `runsecure`).
+- [ ] The one-time self-signed certificate warning was accepted (Android: Advanced →
+      Proceed; iOS: Show Details → visit this website), then the page was reloaded once.
 - [ ] `/dashboard/` opens and the camera permission prompt appears.
 - [ ] After Allow, the live image comes from that phone's **rear** camera and is oriented
       correctly.
+- [ ] When the monitor fills a good part of the camera view, the yellow border snaps onto
+      it and the status reads «مانیتور قفل شد»; the sent path then sees only the monitor.
 - [ ] The WebSocket status is green and the send rate is near 20 FPS.
 - [ ] «شروع خودران» updates the command, throttle and turn indicators; «توقف» freezes the
       counter.
@@ -787,7 +827,7 @@ Model:
 
 Real closed loop:
 
-- [ ] `/` is fullscreen (F11) and «اتصال» is green.
+- [ ] `/` is fullscreen (F11 or the «تمام‌صفحه» button) and «اتصال» is green.
 - [ ] After «شروع خودران» the car moves once the 3-frame window fills and stays on the road.
 - [ ] A collision ⇒ red flash + stop + reset to the centre lane + a banner on the phone.
 - [ ] Approaching the edge ⇒ the car stops at the invisible wall + orange flash + the «مسیر را

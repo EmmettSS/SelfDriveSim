@@ -61,6 +61,7 @@ export class FakeElement extends EventTarget {
   style = { setProperty(name, value) { this[name] = value; } };
   getContext() { return { drawImage: (...args) => this.draws.push(args) }; }
   setAttribute(name, value) { this.attributes[name] = value; }
+  removeAttribute(name) { delete this.attributes[name]; }
   async play() {}
   pause() {}
 }

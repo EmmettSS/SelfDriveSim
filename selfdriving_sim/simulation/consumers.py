@@ -162,6 +162,15 @@ class ControlConsumer(AsyncJsonWebsocketConsumer):
         await self.receive_json(content)
 
     async def receive_json(self, content, **kwargs):
+        if isinstance(content, dict) and content.get("type") == "camera_frame":
+            image = content.get("image")
+            if isinstance(image, str) and (image.startswith("data:image/") or len(image) < 150000):
+                await self.channel_layer.group_send(
+                    RENDER_GROUP,
+                    {"type": "camera.frame", "image": image},
+                )
+            return
+
         try:
             command = sanitize_command(content)
         except CommandValidationError as exc:
@@ -180,6 +189,9 @@ class ControlConsumer(AsyncJsonWebsocketConsumer):
             RENDER_GROUP,
             {"type": "control.update", "command": command},
         )
+
+    async def camera_frame(self, event):
+        """Ignore camera.frame on the sender control socket."""
 
     async def control_update(self, event):
         """Drop ``control.update`` events.
@@ -221,6 +233,10 @@ class RenderConsumer(AsyncJsonWebsocketConsumer):
         commands apart from other messages it may receive later.
         """
         await self.send_json({"type": "control_update", **event["command"]})
+
+    async def camera_frame(self, event):
+        """Forward phone camera frame to the browser renderer."""
+        await self.send_json({"type": "camera_frame", "image": event["image"]})
 
     async def receive(self, text_data=None, bytes_data=None, **kwargs):
         if text_data is None:

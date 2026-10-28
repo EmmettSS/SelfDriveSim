@@ -44,6 +44,18 @@ def test_dashboard_has_all_controls_and_truthful_telemetry_labels(client):
     assert "توقف" in html
 
 
+def test_dashboard_carries_the_monitor_auto_lock_markup(client):
+    """The screen detector ships hidden canvases, a status line and a toggle."""
+    html = client.get("/dashboard/").content.decode()
+
+    assert '<canvas id="screen-canvas" width="64" height="48" hidden' in html
+    assert 'id="screen-overlay"' in html
+    assert 'id="lock-status"' in html
+    assert 'id="btn-screen-lock"' in html
+    assert 'aria-pressed="true"' in html
+    assert "قفل خودکار" in html
+
+
 def test_initial_controls_are_disabled(client):
     html = client.get("/dashboard/").content.decode()
     for button in ("btn-start", "btn-stop"):
@@ -53,8 +65,8 @@ def test_initial_controls_are_disabled(client):
 
 def test_dashboard_loads_the_vendored_model_runtime_before_the_app(client):
     html = client.get("/dashboard/").content.decode()
-    runtime = html.index('src="/static/client/js/vendor/tf.min.js"')
-    app = html.index('src="/static/client/js/inference.js"')
+    runtime = html.index('src="/static/client/js/vendor/tf.min.js')
+    app = html.index('src="/static/client/js/inference.js')
     assert runtime < app
     assert 'type="module"' in html
     assert 'data-model-url="/static/client/models/dave2/model.json"' in html
@@ -70,7 +82,7 @@ def test_dashboard_needs_no_remote_cdn(client):
 
 
 @pytest.mark.parametrize("asset", [
-    "css/dashboard.css", "js/inference.js", "js/reset-after-gru.js", "js/vendor/tf.min.js",
+    "css/dashboard.css", "js/inference.js", "js/reset-after-gru.js", "js/monitor.js", "js/vendor/tf.min.js",
     "js/vendor/README.md", "fonts/Vazirmatn.woff2", "fonts/OFL.txt",
 ])
 def test_dashboard_static_assets_exist(asset):

@@ -101,15 +101,35 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Redis channel layer. It is shared by every Daphne worker, so a group message
 # sent by one process reaches consumers that run in another.
+# For quick local testing without Redis, set USE_IN_MEMORY_CHANNEL_LAYER=1.
 REDIS_HOST = os.environ.get("REDIS_HOST", "127.0.0.1")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
 
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels_redis.core.RedisChannelLayer",
-        "CONFIG": {"hosts": [(REDIS_HOST, REDIS_PORT)]},
-    },
-}
+def _redis_reachable(host: str, port: int) -> bool:
+    import socket
+    try:
+        with socket.create_connection((host, port), timeout=0.15):
+            return True
+    except OSError:
+        return False
+
+if (
+    os.environ.get("USE_IN_MEMORY_CHANNEL_LAYER") == "1"
+    or os.environ.get("CHANNEL_LAYER_BACKEND") == "inmemory"
+    or not _redis_reachable(REDIS_HOST, REDIS_PORT)
+):
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
+        },
+    }
+else:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {"hosts": [(REDIS_HOST, REDIS_PORT)]},
+        },
+    }
 
 # Origins allowed to send unsafe requests (POST, PUT, ...). Additional origins
 # can be given as a comma-separated list in DJANGO_CSRF_TRUSTED_ORIGINS.

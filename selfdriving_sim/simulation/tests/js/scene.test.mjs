@@ -16,6 +16,8 @@ import test from "node:test";
 
 import {
   ACCELERATION_MS2,
+  ADAS_LOOKAHEAD_HORIZON_M,
+  ADAS_OBSTACLE_DANGER_M,
   BLINKER_PHASE_RATE,
   BRAKE_DECELERATION_MS2,
   CAMERA_BUMPER_M,
@@ -34,6 +36,7 @@ import {
   MAX_RECONNECT_ATTEMPTS,
   MAX_SPEED_MS,
   MAX_TRAFFIC_CARS,
+  MAX_PIXEL_RATIO,
   MIN_LANE_GAP_M,
   RECONNECT_BASE_DELAY_MS,
   RECONNECT_MAX_DELAY_MS,
@@ -42,19 +45,24 @@ import {
   SPAWN_DELAY_MIN_S,
   SPAWN_GAP_MAX_M,
   SPAWN_GAP_MIN_M,
+  STARTUP_RUNWAY_CLEARANCE_M,
   STEER_RATE,
   STEERING_SIGN,
   TRAFFIC_COLOURS,
   TRAFFIC_SPEED_MAX,
   TRAFFIC_SPEED_MIN,
+  assessCorridors,
   blinkerIsLit,
   cameraPose,
   canSpawnTraffic,
   carsCollide,
+  choosePixelRatio,
   clamp,
   clampToWall,
+  countBlockedLanesAtZ,
   hazardFrame,
   headingDegrees,
+  isLaneBlockedAtZ,
   nextReconnectDelayMs,
   normalizeCommand,
   pickLane,
@@ -62,6 +70,7 @@ import {
   pickSpawnGap,
   pickTrafficColour,
   pickTrafficSpeed,
+  sceneViewport,
   smoothFrameRate,
   speedToKmh,
   stepHeading,
@@ -295,6 +304,101 @@ test("the traffic pool stops at 20 cars", () => {
   assert.ok(DESPAWN_BEHIND_M > 0);
 });
 
+test("isLaneBlockedAtZ detects cars within longitudinal margin and ignores distant cars", () => {
+  const cars = [
+    { position: { x: -3.4, z: -100 }, userData: { active: true } },
+    { position: { x: 0, z: -200 }, userData: { active: true } },
+    { position: { x: 3.4, z: -100 }, userData: { active: false } }, // inactive ignored
+  ];
+
+  // At z = -100: left lane (-3.4) is blocked
+  assert.equal(isLaneBlockedAtZ(cars, -3.4, -100, 24), true);
+  assert.equal(isLaneBlockedAtZ(cars, -3.4, -115, 24), true); // within 15m (< 24m)
+  assert.equal(isLaneBlockedAtZ(cars, -3.4, -130, 24), false); // 30m away (> 24m)
+  // Center lane is free at z = -100 (car is at -200)
+  assert.equal(isLaneBlockedAtZ(cars, 0, -100, 24), false);
+  // Right lane car is inactive, so right lane is free
+  assert.equal(isLaneBlockedAtZ(cars, 3.4, -100, 24), false);
+});
+
+test("countBlockedLanesAtZ counts how many lanes are occupied in a longitudinal slice", () => {
+  const lanes = [-3.4, 0, 3.4];
+  const cars = [
+    { position: { x: -3.4, z: -80 }, userData: { active: true } },
+    { position: { x: 0, z: -85 }, userData: { active: true } },
+    // right lane (3.4) is free at z = -80
+  ];
+
+  assert.equal(countBlockedLanesAtZ(cars, lanes, -80, 24), 2);
+  assert.equal(countBlockedLanesAtZ(cars, lanes, 0, 24), 0); // start runway clear
+});
+
+test("assessCorridors keeps current lane and signals nothing when path ahead is clear", () => {
+  const lanes = [-3.4, 0, 3.4];
+  const cars = [
+    { position: { x: 0, z: -150 }, userData: { active: true } }, // far away (> horizon 80m)
+  ];
+  const result = assessCorridors(0, 0, 0, cars, lanes, 45, 80);
+
+  assert.equal(result.currentLaneIdx, 1);
+  assert.equal(result.targetLaneIdx, 1);
+  assert.equal(result.shouldAvoid, false);
+  assert.equal(result.turnSignal, 0);
+  assert.equal(result.clearances[1], 80);
+});
+
+test("assessCorridors proactively selects LEFT lane when Center and Right are blocked", () => {
+  const lanes = [-3.4, 0, 3.4];
+  // Ego is at x = 0 (Center lane), z = 0
+  // Center has oncoming car at z = -35 (35m ahead)
+  // Right has oncoming car at z = -38 (38m ahead)
+  // Left is completely free
+  const cars = [
+    { position: { x: 0, z: -35 }, userData: { active: true } },
+    { position: { x: 3.4, z: -38 }, userData: { active: true } },
+  ];
+  const result = assessCorridors(0, 0, 0, cars, lanes, 45, 80);
+
+  assert.equal(result.currentLaneIdx, 1);
+  assert.equal(result.targetLaneIdx, 0); // Selected LEFT lane!
+  assert.equal(result.shouldAvoid, true);
+  assert.equal(result.turnSignal, 1); // Left turn signal!
+  assert.ok(result.tacticalSteering < 0); // Steering left!
+  assert.equal(result.targetX, -3.4);
+});
+
+test("assessCorridors commands left overtake when in right lane and center/right are blocked", () => {
+  const lanes = [-3.4, 0, 3.4];
+  // Ego is at x = 3.4 (Right lane), z = 0
+  // Right is blocked at 30m, Center is blocked at 32m, Left is open
+  const cars = [
+    { position: { x: 3.4, z: -30 }, userData: { active: true } },
+    { position: { x: 0, z: -32 }, userData: { active: true } },
+  ];
+  const result = assessCorridors(3.4, 0, 0, cars, lanes, 45, 80);
+
+  assert.equal(result.currentLaneIdx, 2);
+  assert.equal(result.targetLaneIdx, 0); // Proactively navigates all the way to Left!
+  assert.equal(result.shouldAvoid, true);
+  assert.equal(result.turnSignal, 1); // Left turn signal
+  assert.ok(result.tacticalSteering < 0);
+});
+
+test("assessCorridors resets turn signal once car reaches and aligns with target lane", () => {
+  const lanes = [-3.4, 0, 3.4];
+  // Ego has now navigated to x = -3.4 (Left lane), heading 0
+  const cars = [
+    { position: { x: 0, z: -35 }, userData: { active: true } },
+    { position: { x: 3.4, z: -38 }, userData: { active: true } },
+  ];
+  const result = assessCorridors(-3.4, 0, 0, cars, lanes, 45, 80);
+
+  assert.equal(result.currentLaneIdx, 0);
+  assert.equal(result.targetLaneIdx, 0);
+  assert.equal(result.shouldAvoid, false);
+  assert.equal(result.turnSignal, 0); // Turn signal turns off once aligned in open lane
+});
+
 /* -------------------------------- hazards -------------------------------- */
 
 test("hazard frames carry only a known hazard kind", () => {
@@ -376,4 +480,37 @@ test("reconnect delays double from 500 ms, cap at 15 s and stop after ten tries"
   for (const attempt of [0, -1, 11, 0.5, NaN, Infinity]) {
     assert.equal(nextReconnectDelayMs(attempt), null);
   }
+});
+
+/* --------------------------- screen lock / fit --------------------------- */
+
+test("the pixel ratio is re-derived per resize and clamped to sane bounds", () => {
+  assert.equal(choosePixelRatio(1), 1);
+  assert.equal(choosePixelRatio(1.25), 1.25); // 125% browser zoom stays exact
+  assert.equal(choosePixelRatio(2), 2);
+  assert.equal(choosePixelRatio(2.5), MAX_PIXEL_RATIO); // HiDPI ceiling
+  assert.equal(choosePixelRatio(0), 1);
+  assert.equal(choosePixelRatio(NaN), 1);
+  assert.equal(choosePixelRatio(undefined), 1);
+});
+
+test("sceneViewport reads the canvas layout box the stylesheet locked", () => {
+  const canvas = { clientWidth: 1920, clientHeight: 1080 };
+
+  assert.deepEqual(sceneViewport(canvas), { width: 1920, height: 1080 });
+});
+
+test("sceneViewport falls back to the window and never below 1x1", () => {
+  const windowLike = { innerWidth: 1366, innerHeight: 768 };
+
+  assert.deepEqual(sceneViewport(null, windowLike), { width: 1366, height: 768 });
+  assert.deepEqual(
+    sceneViewport({ clientWidth: 0, clientHeight: 0 }, windowLike),
+    { width: 1366, height: 768 },
+  );
+  assert.deepEqual(sceneViewport(null), { width: 1, height: 1 });
+  assert.deepEqual(
+    sceneViewport({ clientWidth: 0, clientHeight: 0 }),
+    { width: 1, height: 1 },
+  );
 });

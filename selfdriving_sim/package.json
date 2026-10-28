@@ -18,5 +18,8 @@
     "@tailwindcss/cli": "4.3.0",
     "@tensorflow/tfjs": "4.22.0",
     "tailwindcss": "4.3.0"
+  },
+  "dependencies": {
+    "@tensorflow-models/coco-ssd": "^2.2.3"
   }
 }

@@ -24,3 +24,6 @@ staticfiles/
 # TensorFlow.js model in client/static/client/models/dave2/ is committed on purpose.
 *.h5
 models/data/
+
+# Auto-generated self-signed HTTPS pair (runsecure)
+certs/

@@ -18,6 +18,8 @@ cd "$PROJECT_DIR"
 
 # --- configuration -----------------------------------------------------------
 PORT="${PORT:-8000}"
+TLS_PORT="${TLS_PORT:-8443}"
+SIMULATION_TLS_PORT="$TLS_PORT"
 REDIS_HOST="${REDIS_HOST:-127.0.0.1}"
 REDIS_PORT="${REDIS_PORT:-6379}"
 
@@ -79,21 +81,18 @@ PHONE_HOST="${LAN_IP:-<LAN-IP>}"
 
 echo
 echo "    PC (renderer, fullscreen):  http://localhost:${PORT}/"
-for ip in $LAN_IPS; do
-  echo "    PC over LAN:                http://${ip}:${PORT}/"
-done
-echo "    Phone:                      http://${PHONE_HOST}:${PORT}/dashboard/"
-echo "                                (with the Chrome flag, guide in docs/)"
+echo "    Phone dashboard:            https://${PHONE_HOST}:${TLS_PORT}/dashboard/"
 echo
-echo "    One-time phone setup — same Wi-Fi, then in Chrome on the phone:"
-echo "      chrome://flags/#unsafely-treat-insecure-origin-as-secure → Enabled"
-echo "      add  http://${PHONE_HOST}:${PORT}  →  Relaunch"
-echo "      then open  http://${PHONE_HOST}:${PORT}/dashboard/"
-echo "    Guide: docs/guide.fa.md (fa) · docs/guide.en.md (en)"
+echo "    Phone setup - scan the QR code shown on the monitor page, same Wi-Fi,"
+echo "      then accept the one-time self-signed certificate warning:"
+echo "        Android Chrome:  Advanced -> Proceed to <IP>"
+echo "        iOS Safari:      Show Details -> visit this website"
+echo "    HTTPS on port ${TLS_PORT} is what makes the camera work on Android and iOS."
+echo "    Guide: docs/guide.fa.md (fa) - docs/guide.en.md (en)"
 echo
 echo "    Keyboard fallback drives the car when no phone command arrives."
 echo
 
 # --- 5. serve ----------------------------------------------------------------
-echo "==> Starting Daphne on 0.0.0.0:${PORT} (Ctrl+C to stop) …"
-exec "$PY" -m daphne -b 0.0.0.0 -p "$PORT" selfdriving_sim.asgi:application
+echo "==> Serving on 0.0.0.0:${PORT} (http) and 0.0.0.0:${TLS_PORT} (https) - Ctrl+C to stop"
+exec "$PY" manage.py runsecure "$PORT"

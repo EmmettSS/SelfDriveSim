@@ -51,6 +51,25 @@ async def test_command_from_control_reaches_render():
     await render.disconnect()
 
 
+async def test_camera_frame_from_control_reaches_render():
+    render = make_communicator("/ws/render/")
+    control = make_communicator("/ws/control/")
+    assert (await render.connect())[0]
+    assert (await control.connect())[0]
+
+    frame_msg = {"type": "camera_frame", "image": "data:image/jpeg;base64,sampleframe123"}
+    await control.send_json_to(frame_msg)
+
+    assert await render.receive_json_from(timeout=RECEIVE_TIMEOUT) == {
+        "type": "camera_frame",
+        "image": "data:image/jpeg;base64,sampleframe123",
+    }
+    assert await control.receive_nothing(timeout=0.1)
+
+    await control.disconnect()
+    await render.disconnect()
+
+
 async def test_out_of_range_steering_is_clipped_to_one():
     render = make_communicator("/ws/render/")
     control = make_communicator("/ws/control/")

@@ -8,17 +8,190 @@
   <title>کابین کنترل | SelfDriveSim</title>
   <link rel="icon" href="data:,">
   <link rel="preload" href="{% static 'client/fonts/Vazirmatn.woff2' %}" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="{% static 'client/css/dashboard.css' %}">
+  <link rel="stylesheet" href="{% static 'client/css/dashboard.css' %}?v={{ cache_buster|default:'1' }}">
 </head>
 <body>
   <video id="camera-feed" autoplay muted playsinline aria-label="تصویر زنده دوربین عقب"></video>
+  <canvas id="screen-canvas" width="64" height="48" hidden aria-hidden="true"></canvas>
   <canvas id="process-canvas" width="160" height="120" hidden aria-hidden="true"></canvas>
   <div class="camera-shade" aria-hidden="true"></div>
+  <!-- The monitor-lock focus frame: dimmed surroundings + border on the screen. -->
+  <canvas id="screen-overlay" aria-hidden="true"></canvas>
 
   <!-- Hazard warning relayed from the simulator: collision or wall grind. -->
   <div id="hazard-banner" role="alert">
     <span id="hazard-banner-text"></span>
   </div>
+
+  <!-- Interactive 6-point manual monitor calibration overlay -->
+  <div id="manual-crop-layer" class="manual-crop-layer" hidden aria-hidden="true">
+    <div class="manual-crop-toolbar">
+      <div class="manual-crop-title-row">
+        <span class="manual-crop-title">✋ کادر دستی (۶ نقطه کنترل)</span>
+        <span class="manual-crop-hint">نقاط ۱ تا ۶ را با انگشت روی لبه‌های مانیتور بکشید</span>
+      </div>
+      <div class="manual-crop-actions">
+        <button id="btn-manual-crop-reset" type="button" class="manual-crop-btn reset" title="بازنشانی اندازه کادر به ابعاد پیش‌فرض">⟲ بازنشانی</button>
+        <button id="btn-manual-crop-done" type="button" class="manual-crop-btn done" title="ذخیره و قفل کادر مانیتور">✓ تایید و قفل کادر</button>
+      </div>
+    </div>
+    <div id="manual-crop-box" class="manual-crop-box">
+      <div class="crop-box-tag">● کادر فعال مانیتور (برای جابه‌جایی، داخل کادر را بکشید)</div>
+      <!-- The 6 Primary Numbered Touch Handles -->
+      <div class="crop-handle handle-tl" data-handle="tl" title="نقطه ۱: گوشه بالا-چپ"><span class="handle-pin">1</span></div>
+      <div class="crop-handle handle-tc" data-handle="tc" title="نقطه ۲: لبه بالا-وسط"><span class="handle-pin">2</span></div>
+      <div class="crop-handle handle-tr" data-handle="tr" title="نقطه ۳: گوشه بالا-راست"><span class="handle-pin">3</span></div>
+      <div class="crop-handle handle-bl" data-handle="bl" title="نقطه ۴: گوشه پایین-چپ"><span class="handle-pin">4</span></div>
+      <div class="crop-handle handle-bc" data-handle="bc" title="نقطه ۵: لبه پایین-وسط"><span class="handle-pin">5</span></div>
+      <div class="crop-handle handle-br" data-handle="br" title="نقطه ۶: گوشه پایین-راست"><span class="handle-pin">6</span></div>
+      <!-- Side edge handles for extra convenience -->
+      <div class="crop-handle handle-ml" data-handle="ml" title="لبه وسط-چپ"><span class="handle-pin">◀</span></div>
+      <div class="crop-handle handle-mr" data-handle="mr" title="لبه وسط-راست"><span class="handle-pin">▶</span></div>
+    </div>
+  </div>
+
+  <style>
+  .manual-crop-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    pointer-events: auto;
+    touch-action: none;
+    background: rgba(7, 12, 15, 0.45);
+  }
+  .manual-crop-layer[hidden] {
+    display: none !important;
+  }
+  .manual-crop-toolbar {
+    position: fixed;
+    top: max(12px, env(safe-area-inset-top));
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10001;
+    background: rgba(11, 16, 18, 0.96);
+    border: 1px solid #f5d764;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.85);
+    border-radius: 14px;
+    padding: 8px 16px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px 16px;
+    width: min(94%, 520px);
+  }
+  .manual-crop-title-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .manual-crop-title {
+    color: #f5d764;
+    font-weight: 700;
+    font-size: 13px;
+  }
+  .manual-crop-hint {
+    color: #c5d2d6;
+    font-size: 10.5px;
+  }
+  .manual-crop-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .manual-crop-btn {
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 11.5px;
+    font-weight: 700;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.15s;
+  }
+  .manual-crop-btn.done {
+    background: #f5d764;
+    color: #070c0f;
+    box-shadow: 0 2px 10px rgba(245, 215, 100, 0.4);
+  }
+  .manual-crop-btn.done:hover {
+    background: #ffffff;
+  }
+  .manual-crop-btn.reset {
+    background: rgba(255, 255, 255, 0.12);
+    color: #e5e7eb;
+    border-color: rgba(255, 255, 255, 0.2);
+  }
+  .manual-crop-box {
+    position: absolute;
+    left: 10%;
+    top: 15%;
+    width: 80%;
+    height: 70%;
+    min-width: 60px;
+    min-height: 60px;
+    border: 3.5px solid #f5d764;
+    box-shadow: 0 0 0 9999px rgba(7, 12, 15, 0.78), 0 0 24px rgba(245, 215, 100, 0.5);
+    box-sizing: border-box;
+    cursor: move;
+    touch-action: none;
+    z-index: 10000;
+  }
+  .crop-box-tag {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    background: rgba(7, 12, 15, 0.85);
+    border: 1px solid #f5d764;
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-size: 9.5px;
+    color: #f5d764;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+  .crop-handle {
+    position: absolute;
+    width: 52px;
+    height: 52px;
+    margin-left: -26px;
+    margin-top: -26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    touch-action: none;
+    z-index: 10002;
+  }
+  .handle-pin {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: #f5d764;
+    color: #070c0f;
+    font-weight: 800;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2.5px solid #070c0f;
+    box-shadow: 0 0 12px rgba(245, 215, 100, 0.95);
+    transition: transform 0.1s, background-color 0.1s;
+  }
+  .crop-handle:active .handle-pin, .crop-handle.is-active .handle-pin {
+    transform: scale(1.3);
+    background: #ffffff;
+    color: #000000;
+    box-shadow: 0 0 18px rgba(255, 255, 255, 1);
+  }
+  .handle-tl { top: 0; left: 0; }
+  .handle-tc { top: 0; left: 50%; }
+  .handle-tr { top: 0; left: 100%; }
+  .handle-bl { top: 100%; left: 0; }
+  .handle-bc { top: 100%; left: 50%; }
+  .handle-br { top: 100%; left: 100%; }
+  .handle-ml { top: 50%; left: 0; }
+  .handle-mr { top: 50%; left: 100%; }
+  </style>
 
   <main id="dashboard" class="dashboard-shell" data-model-url="{% static 'client/models/dave2/model.json' %}">
     <header class="dashboard-header flex items-center justify-between gap-3">
@@ -31,7 +204,8 @@
           <h1 class="mt-1 text-sm font-medium text-muted">کابین کنترل موبایل</h1>
         </div>
       </div>
-      <div class="flex items-center gap-3">
+      <div class="flex items-center gap-2">
+        <button id="btn-view-mode" class="view-mode-toggle" type="button" aria-pressed="false" title="تغییر به دید کامل مانیتور بدون مزاحمت پنل‌ها">⛶ دید کامل مانیتور</button>
         <span class="version-label hidden sm:inline">نسخه ۱٫۰</span>
         <span class="mode-badge" dir="ltr"><span class="mode-dot" aria-hidden="true"></span><span id="mode-badge">MOCK MODE</span></span>
       </div>
@@ -62,11 +236,12 @@
       </div>
     </div>
 
-    <section class="camera-window" aria-label="قاب تنظیم دوربین">
+    <section id="camera-window" class="camera-window" aria-label="قاب تنظیم دوربین">
       <div class="camera-meta flex items-center justify-between gap-2">
         <span class="flex items-center gap-2"><span id="camera-dot" class="camera-dot" aria-hidden="true"></span><span id="camera-status">دوربین عقب</span></span>
         <span id="camera-resolution" class="font-mono text-[10px] tracking-wider" dir="ltr">CAM 01</span>
       </div>
+      <p id="lock-status" role="status" aria-live="polite">در جست‌وجوی مانیتور…</p>
       <div class="viewfinder" aria-hidden="true">
         <i class="corner corner-tl"></i><i class="corner corner-tr"></i>
         <i class="corner corner-bl"></i><i class="corner corner-br"></i>
@@ -78,7 +253,19 @@
         <p id="camera-message" class="camera-message">برای دیدن مانیتور، دسترسی به دوربین عقب را تأیید کنید.</p>
         <button id="btn-camera" class="camera-retry" type="button" disabled>در انتظار دسترسی…</button>
       </div>
-      <p class="alignment-hint">گوشی را ثابت و روبه‌روی مانیتور قرار دهید</p>
+      <div class="camera-controls">
+        <p class="alignment-hint">گوشی را روبه‌روی مانیتور بگیرید یا روی تصویر مانیتور ضربه بزنید</p>
+        <div class="camera-tools-cluster flex flex-wrap items-center justify-center gap-1.5">
+          <button id="btn-screen-lock" class="screen-lock-toggle" type="button" aria-pressed="true">قفل خودکار: روشن</button>
+          <button id="btn-manual-crop" class="screen-tool-btn" type="button" aria-pressed="false" title="تنظیم دستی کادر مانیتور با ۶ نقطه کنترل">✋ کادر دستی (۶ نقطه)</button>
+          <button id="btn-snap-edges" class="screen-tool-btn" type="button" title="انطباق دقیق کادر بر صفحه مانیتور">🎯 انطباق لبه‌ها</button>
+          <div class="trim-pill inline-flex items-center" title="تنظیم ظریف حاشیه مانیتور">
+            <button id="btn-trim-minus" class="screen-trim-btn" type="button" title="کوچک‌تر کردن کادر (حذف لبه اضافه)">− حاشیه</button>
+            <span class="trim-sep">|</span>
+            <button id="btn-trim-plus" class="screen-trim-btn" type="button" title="بزرگ‌تر کردن کادر">+ حاشیه</button>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section class="cockpit" aria-label="پنل فرمان و پدال‌ها">
@@ -87,7 +274,10 @@
           <span id="run-dot" class="run-dot" aria-hidden="true"></span>
           <h2 id="run-status" class="text-xs font-medium">آماده‌سازی</h2>
         </div>
-        <span class="text-[10px] tracking-[0.18em] text-muted" dir="ltr">CONTROL PANEL</span>
+        <div class="flex items-center gap-2">
+          <button id="btn-cockpit-toggle" class="cockpit-collapse-toggle text-[10px] text-muted hover:text-signal" type="button">⛶ دید کامل مانیتور</button>
+          <span class="text-[10px] tracking-[0.18em] text-muted hidden sm:inline" dir="ltr">CONTROL PANEL</span>
+        </div>
       </div>
 
       <!-- Physical left/right positions stay fixed even though the page is RTL. -->
@@ -169,7 +359,8 @@
     <noscript><p class="noscript-warning">برای استفاده از دوربین و ارسال فرمان، JavaScript مرورگر را فعال کنید.</p></noscript>
   </main>
 
-  <script src="{% static 'client/js/vendor/tf.min.js' %}"></script>
-  <script type="module" src="{% static 'client/js/inference.js' %}"></script>
+  <script src="{% static 'client/js/vendor/tf.min.js' %}?v={{ cache_buster|default:'105' }}"></script>
+  <script src="{% static 'client/js/vendor/coco-ssd.min.js' %}?v={{ cache_buster|default:'105' }}"></script>
+  <script type="module" src="{% static 'client/js/inference.js' %}?v={{ cache_buster|default:'105' }}"></script>
 </body>
 </html>
