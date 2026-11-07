@@ -209,6 +209,13 @@ export const ADAS_LOOKAHEAD_HORIZON_M = 95;
 export const ADAS_SIGNAL_INTENT_DISTANCE_M = 70;
 /** Distance threshold below which evasion steering physically begins (meters). */
 export const ADAS_OBSTACLE_DANGER_M = 48;
+/**
+ * Lane-centering gains shared by every ADAS consumer (camera driving and the
+ * sim autopilot). Previously each controller had its own copy with different
+ * values, so both patched the shared corridorState and fought each other.
+ */
+export const ADAS_CENTERING_DRIFT_GAIN = 0.15;
+export const ADAS_CENTERING_HEADING_GAIN = 0.40;
 /** Minimum clearance ahead in the center lane during startup or reset (meters). */
 export const STARTUP_RUNWAY_CLEARANCE_M = 110;
 
@@ -411,8 +418,12 @@ export function evaluateCorridorManeuver(
     // or cause the vehicle to swerve back into the filled lane!
     if (!reachedTarget) {
       targetLaneIdx = lockedTargetLane;
-      shouldAvoid = true;
       nextLockedLane = lockedTargetLane;
+      // Mid-transit: only keep the evasion ladder active when the lane we
+      // are moving INTO is actually blocked, or the lane we are leaving is
+      // critically close. The old unconditional ``true`` kept braking the
+      // whole way across — the reported "stops briefly mid-lane-change".
+      shouldAvoid = targetClearance < dangerDist || currentClearance < 14;
       const targetX = laneCentres[targetLaneIdx];
       if (targetX < egoX - 0.20 || targetLaneIdx < currentLaneIdx) {
         turnSignal = 1;
@@ -631,6 +642,73 @@ export function assessCorridorsFromVisualDetections(
 // Reusable offscreen canvas for high-performance visual obstacle detection
 let _detectOffscreen = null;
 
+// ---------------------------------------------------------------------------
+// Perception camera calibration.
+//
+// The scene renders with a 60-degree (vertical) FOV camera; the pixel-to-angle
+// conversion and the road geometry below MUST be derived from the live camera
+// and the active road preset, not hard constants. Call
+// {@link setPerceptionCalibration} after camera creation, on resize and on
+// every road-preset change. Defaults match the classic narrow preset.
+// ---------------------------------------------------------------------------
+let _perceptionFocalCrop = 104;            // 4:3 perception buffer (crop of the render)
+let _perceptionFocalFull = 104;            // full-frame source stretched into 160x120
+let _perceptionDividerXs = [-1.7, 1.7];    // world-x of the lane divider markings
+let _perceptionRoadHalfWidth = 4.8;        // paved half-width in meters
+
+/**
+ * Full-frame horizontal focal for the current camera FOV and canvas aspect.
+ * A canvas/image stretched into the 160x120 buffer spans the whole frame, so
+ * its 160px width covers the full horizontal FOV: focal = 80 / tan(hHalf).
+ */
+export function perceptionFocalX(fovDeg, canvasAspect) {
+  if (!Number.isFinite(fovDeg) || !Number.isFinite(canvasAspect) || canvasAspect <= 0) {
+    return _perceptionFocalFull;
+  }
+  const verticalHalf = Math.tan((fovDeg * Math.PI) / 360);
+  return 80 / (verticalHalf * canvasAspect);
+}
+
+/**
+ * Focal of the 4:3 *perception crop* that the autopilot preview pipeline
+ * produces (center-cut of a landscape canvas, full height). It always spans
+ * the full vertical FOV and 4/3 of it horizontally — independent of the
+ * canvas aspect as long as the canvas is at least 4:3 (the typical case).
+ */
+export function perceptionFocalCrop(fovDeg, canvasAspect) {
+  if (!Number.isFinite(fovDeg) || !Number.isFinite(canvasAspect) || canvasAspect <= 0) {
+    return _perceptionFocalCrop;
+  }
+  const verticalHalf = Math.tan((fovDeg * Math.PI) / 360);
+  return 80 / (verticalHalf * Math.min(canvasAspect, 4 / 3));
+}
+
+/** Source kind decides the mapping: ImageData buffers are already 4:3 crops;
+ *  canvases/images are stretched full-frame. Near-4:3 frames (e.g. the phone
+ *  capture) are treated as crops — their true FOV is unknowable anyway. */
+function focalForSource(source) {
+  if (source && source.data && source.width && source.height) {
+    return _perceptionFocalCrop;
+  }
+  const w = (source && (source.width || source.videoWidth)) || 160;
+  const h = (source && (source.height || source.videoHeight)) || 120;
+  return Math.abs(w / Math.max(h, 1) - 4 / 3) < 0.02
+    ? _perceptionFocalCrop
+    : _perceptionFocalFull;
+}
+
+export function setPerceptionCalibration({ focalX, focalFull, dividerXs, roadHalfWidth } = {}) {
+  if (Number.isFinite(focalX) && focalX > 1) _perceptionFocalCrop = focalX;
+  if (Number.isFinite(focalFull) && focalFull > 1) _perceptionFocalFull = focalFull;
+  if (Array.isArray(dividerXs) && dividerXs.length === 2
+      && Number.isFinite(dividerXs[0]) && Number.isFinite(dividerXs[1])) {
+    _perceptionDividerXs = [dividerXs[0], dividerXs[1]];
+  }
+  if (Number.isFinite(roadHalfWidth) && roadHalfWidth > 1) {
+    _perceptionRoadHalfWidth = roadHalfWidth;
+  }
+}
+
 /**
  * Pure Computer Vision Vehicle & Obstacle Detector.
  * Operates strictly on raw pixel buffers from the camera feed.
@@ -643,7 +721,12 @@ let _detectOffscreen = null;
  * @returns {Array<Object>} Array of detected obstacles sorted by distance.
  */
 export function detectVisualObstacles(source, egoX = 0, egoHeading = 0, laneCentres = LANE_CENTRES) {
+  _perceptionSourceUsed = "cv";
   if (!source) return [];
+
+  // Focal depends on the source kind: ImageData buffers are already 4:3
+  // perception crops, stretched canvases/images span the full frame.
+  const focalPx = focalForSource(source);
 
   let data = null;
   let imgWidth = 160;
@@ -682,9 +765,9 @@ export function detectVisualObstacles(source, egoX = 0, egoHeading = 0, laneCent
 
     for (let x = 0; x < 160; x += 2) {
       if (y >= 74 && (x < 38 || x > 122)) continue;
-      const thetaCam = (x - 80) / 48;
+      const thetaCam = (x - 80) / focalPx;
       const worldX = egoX + distM * (thetaCam + egoHeading);
-      if (Math.abs(worldX) > 4.6) continue;
+      if (Math.abs(worldX) > _perceptionRoadHalfWidth - 0.2) continue;
 
       const idx = (y * 160 + x) * 4;
       rs.push(data[idx]);
@@ -719,10 +802,11 @@ export function detectVisualObstacles(source, egoX = 0, egoHeading = 0, laneCent
       if (y >= 74 && (x < 38 || x > 122)) {
         continue;
       }
-      const thetaCam = (x - 80) / 48;
+      const thetaCam = (x - 80) / focalPx;
       const worldX = egoX + distM * (thetaCam + egoHeading);
-      // Strictly restrict visual scanning to paved road surface (|worldX| <= 4.8m)
-      if (Math.abs(worldX) > 4.8) {
+      // Strictly restrict visual scanning to the paved road surface of the
+      // active road preset (not a hardcoded width).
+      if (Math.abs(worldX) > _perceptionRoadHalfWidth) {
         continue;
       }
 
@@ -735,8 +819,9 @@ export function detectVisualObstacles(source, egoX = 0, egoHeading = 0, laneCent
       const minC = Math.min(r, g, b);
       const chroma = maxC - minC;
 
-      // 1. Lane divider markings (white dashes, yellow studs located at X = +-1.7m)
-      const isOnDivider = Math.abs(worldX - (-1.7)) < 0.32 || Math.abs(worldX - 1.7) < 0.32;
+      // 1. Lane divider markings (white dashes, yellow studs) at the preset divider positions
+      const isOnDivider = Math.abs(worldX - _perceptionDividerXs[0]) < 0.32
+        || Math.abs(worldX - _perceptionDividerXs[1]) < 0.32;
       const isWhiteLine = (lum > Math.max(130, roadLum + 35)) && maxDiff <= 25 && isOnDivider;
       const isYellowLine = r > 110 && g > 95 && b < 80 && (r - b) > 30 && isOnDivider;
       if (isWhiteLine || isYellowLine) {
@@ -837,19 +922,22 @@ export function detectVisualObstacles(source, egoX = 0, egoHeading = 0, laneCent
           }
 
           const centerX = (bx1 + bx2) / 2;
-          const thetaCam = (centerX - 80) / 48;
+          const thetaCam = (centerX - 80) / focalPx;
           const thetaWorld = thetaCam + egoHeading;
           const worldX = egoX + distM * thetaWorld;
 
           // Road lateral boundary filter:
-          // Ignore detections outside paved road width (guardrails, shoulder, grass)
-          if (Math.abs(worldX) > 4.8) {
+          // Ignore detections outside the preset paved road width
+          if (Math.abs(worldX) > _perceptionRoadHalfWidth) {
             continue;
           }
 
           // Lane divider line rejection:
-          // Dashed lines lie at X = -1.7 and X = +1.7. If a narrow vertical blob is directly on the divider, reject it
-          if (bw <= 3 && bh >= 5 && (Math.abs(worldX - (-1.7)) < 0.22 || Math.abs(worldX - 1.7) < 0.22)) {
+          // Dashed lines lie at the preset divider x-positions. If a narrow
+          // vertical blob is directly on the divider, reject it
+          if (bw <= 3 && bh >= 5
+              && (Math.abs(worldX - _perceptionDividerXs[0]) < 0.22
+                  || Math.abs(worldX - _perceptionDividerXs[1]) < 0.22)) {
             continue;
           }
 
@@ -859,9 +947,9 @@ export function detectVisualObstacles(source, egoX = 0, egoHeading = 0, laneCent
           // Enforce lane boundary deadband margins so passing tires stay in their actual lane:
           let laneIdx = 1;
           const dividerMargin = distM <= 9 ? 0.38 : 0.0;
-          if (worldX < -1.7 - dividerMargin) {
+          if (worldX < _perceptionDividerXs[0] - dividerMargin) {
             laneIdx = 0;
-          } else if (worldX > 1.7 + dividerMargin) {
+          } else if (worldX > _perceptionDividerXs[1] + dividerMargin) {
             laneIdx = 2;
           }
 
@@ -902,38 +990,45 @@ export function detectVisualObstacles(source, egoX = 0, egoHeading = 0, laneCent
 // Reusable offscreen canvas and model references for AI inference
 let _aiOffscreen = null;
 let _cocoModel = null;
-let _cocoLoading = false;
+let _cocoLoadPromise = null;
 let _cocoReady = false;
+
+/**
+ * Which detector actually produced the latest obstacle list:
+ * "ai" (COCO-SSD deep learning) or "cv_fallback" (optical heuristics).
+ * The HUD reads this so AI mode never silently masquerades as CV.
+ */
+let _perceptionSourceUsed = "cv";
+export function lastPerceptionSourceUsed() {
+  return _perceptionSourceUsed;
+}
 
 /**
  * Loads the pre-trained COCO-SSD Deep Learning Object Detection Model
  * in the browser environment (WebGL backend via TensorFlow.js).
+ * Concurrent calls share a single load promise (no busy-wait race).
  */
-export async function ensureCocoDetector() {
-  if (_cocoModel) return _cocoModel;
-  if (_cocoLoading) {
-    while (_cocoLoading) {
-      await new Promise(r => setTimeout(r, 50));
-    }
-    return _cocoModel;
-  }
+export function ensureCocoDetector() {
+  if (_cocoModel) return Promise.resolve(_cocoModel);
+  if (_cocoLoadPromise) return _cocoLoadPromise;
   if (typeof window === "undefined" || typeof window.cocoSsd?.load !== "function") {
-    return null;
+    return Promise.resolve(null);
   }
-  _cocoLoading = true;
-  try {
-    _cocoModel = await window.cocoSsd.load({
-      modelUrl: "/static/client/models/coco-ssd/model.json",
+  _cocoLoadPromise = window.cocoSsd
+    .load({ modelUrl: "/static/client/models/coco-ssd/model.json" })
+    .then((model) => {
+      _cocoModel = model;
+      _cocoReady = true;
+      console.info("[Perception] COCO-SSD Deep Learning Vehicle Detector loaded successfully");
+      return model;
+    })
+    .catch((err) => {
+      // Allow a later retry after a failed load.
+      _cocoLoadPromise = null;
+      console.warn("[Perception] COCO-SSD load failed, falling back:", err);
+      return null;
     });
-    _cocoReady = true;
-    _cocoLoading = false;
-    console.info("[Perception] COCO-SSD Deep Learning Vehicle Detector loaded successfully");
-    return _cocoModel;
-  } catch (err) {
-    _cocoLoading = false;
-    console.warn("[Perception] COCO-SSD load failed, falling back:", err);
-    return null;
-  }
+  return _cocoLoadPromise;
 }
 
 /**
@@ -960,7 +1055,9 @@ export async function detectObstaclesWithAI(source, egoX = 0, egoHeading = 0, la
     if (!model) {
       model = await ensureCocoDetector();
       if (!model) {
-        return detectVisualObstacles(source, egoX, egoHeading, laneCentres);
+        const fallback = detectVisualObstacles(source, egoX, egoHeading, laneCentres);
+        _perceptionSourceUsed = "cv_fallback";
+        return fallback;
       }
     }
 
@@ -984,13 +1081,17 @@ export async function detectObstaclesWithAI(source, egoX = 0, egoHeading = 0, la
       preds = await model.detect(inputTarget, 10, 0.18);
     } catch (err) {
       console.warn("[Perception] AI inference exception:", err);
-      return detectVisualObstacles(source, egoX, egoHeading, laneCentres);
+      const fallback = detectVisualObstacles(source, egoX, egoHeading, laneCentres);
+      _perceptionSourceUsed = "cv_fallback";
+      return fallback;
     }
   }
 
   if (!Array.isArray(preds) || preds.length === 0) {
     if (!source.mockPredictions && typeof document !== "undefined") {
-      return detectVisualObstacles(source, egoX, egoHeading, laneCentres);
+      const fallback = detectVisualObstacles(source, egoX, egoHeading, laneCentres);
+      _perceptionSourceUsed = "cv_fallback";
+      return fallback;
     }
     return [];
   }
@@ -1016,21 +1117,23 @@ export async function detectObstaclesWithAI(source, egoX = 0, egoHeading = 0, la
     if (bw < 2 || bh < 2) continue;
 
     const yBottom = by + bh;
+    const boxFocal = focalForSource(source);
     const dy = Math.max(yBottom - 59.5, 0.8);
     const distGround = 100 / dy;
-    const distWidth = 86.4 / Math.max(bw, 1);
+    // Physical width model: a ~1.8m car spanning bw px sits at focal * 1.8 / bw meters.
+    const distWidth = (1.8 * boxFocal) / Math.max(bw, 1);
     const distM = Math.max(1, Math.min(95, Math.round(distGround * 0.60 + distWidth * 0.40)));
 
     const centerX = bx + bw / 2;
-    const thetaCam = (centerX - 80) / 48;
+    const thetaCam = (centerX - 80) / boxFocal;
     const thetaWorld = thetaCam + egoHeading;
     const worldX = +(egoX + distM * thetaWorld).toFixed(2);
 
-    if (Math.abs(worldX) > 4.6) continue;
+    if (Math.abs(worldX) > _perceptionRoadHalfWidth - 0.2) continue;
 
     let laneIdx = 1;
-    if (worldX < -1.7) laneIdx = 0;
-    else if (worldX > 1.7) laneIdx = 2;
+    if (worldX < _perceptionDividerXs[0]) laneIdx = 0;
+    else if (worldX > _perceptionDividerXs[1]) laneIdx = 2;
 
     rawBoxes.push({
       source: "ai",
@@ -1045,8 +1148,11 @@ export async function detectObstaclesWithAI(source, egoX = 0, egoHeading = 0, la
     });
   }
 
+  _perceptionSourceUsed = rawBoxes.length > 0 ? "ai" : _perceptionSourceUsed;
   if (rawBoxes.length === 0 && !source.mockPredictions && typeof document !== "undefined") {
-    return detectVisualObstacles(source, egoX, egoHeading, laneCentres);
+    const fallback = detectVisualObstacles(source, egoX, egoHeading, laneCentres);
+    _perceptionSourceUsed = "cv_fallback";
+    return fallback;
   }
 
   rawBoxes.sort((a, b) => a.distanceM - b.distanceM);
@@ -1069,6 +1175,7 @@ export async function detectObstaclesWithAI(source, egoX = 0, egoHeading = 0, la
  * @returns {Array<Object>} Detected obstacle clusters with 3D positions and 2D HUD projections.
  */
 export function detectObstaclesWithLidar(egoX, egoZ, egoHeading, trafficCars, numRays = 75, maxRange = 95) {
+  _perceptionSourceUsed = "lidar";
   if (!Array.isArray(trafficCars)) return [];
 
   const sinH = Math.sin(egoHeading);
@@ -1137,7 +1244,7 @@ export function detectObstaclesWithLidar(egoX, egoZ, egoHeading, trafficCars, nu
       }
     }
 
-    if (bestHit && Math.abs(bestHit.worldX) <= 4.6) {
+    if (bestHit && Math.abs(bestHit.worldX) <= _perceptionRoadHalfWidth - 0.2) {
       hits.push(bestHit);
     }
   }
@@ -1152,16 +1259,16 @@ export function detectObstaclesWithLidar(egoX, egoZ, egoHeading, trafficCars, nu
       existing.worldX = +(existing.worldX * 0.5 + h.worldX * 0.5).toFixed(2);
     } else {
       let laneIdx = 1;
-      if (h.worldX < -1.7) laneIdx = 0;
-      else if (h.worldX > 1.7) laneIdx = 2;
+      if (h.worldX < _perceptionDividerXs[0]) laneIdx = 0;
+      else if (h.worldX > _perceptionDividerXs[1]) laneIdx = 2;
 
       // Project onto 160x120 camera view for visual HUD overlay
       const dist = Math.max(h.distanceM, 1);
       const dy = Math.max(100 / dist, 1);
       const thetaCam = (h.worldX - egoX) / dist - egoHeading;
-      const centerX = Math.round(80 + 48 * thetaCam);
-      const bw = Math.max(3, Math.round((48 * 1.8) / dist));
-      const bh = Math.max(2, Math.round((48 * 1.3) / dist));
+      const centerX = Math.round(80 + _perceptionFocalCrop * thetaCam);
+      const bw = Math.max(3, Math.round((_perceptionFocalCrop * 1.8) / dist));
+      const bh = Math.max(2, Math.round((_perceptionFocalCrop * 1.3) / dist));
       const bx = Math.round(centerX - bw / 2);
       const by = Math.round(59.5 + dy - bh);
 
@@ -1826,7 +1933,7 @@ const SKY_COLOUR = 0xbcd4e6;
 const FOG_NEAR = 90;
 const FOG_FAR = 300;
 const GROUND_COLOUR = 0x4a6b3a;
-const LANE_DIVIDER_X = [-2, 2];
+const LANE_DIVIDER_X = [-1.7, 1.7];
 const SCENERY_SPACING = 24;
 /** Scenery stays within this distance behind the car before it is recycled. */
 const SCENERY_KEEP_BEHIND_M = 25;
@@ -1950,7 +2057,9 @@ export const WEATHER_PRESETS = Object.freeze({
   },
 });
 
-export const VEHICLE_TYPES = Object.freeze(["tesla", "bmw", "sedan"]);
+// Only vehicle GLTF prefabs that actually ship in static/simulation/models.
+// ("sedan" used to be listed but had no model or pickVehicleType branch.)
+export const VEHICLE_TYPES = Object.freeze(["tesla", "bmw"]);
 
 export function pickVehicleType(random = Math.random) {
   const r = random();
@@ -2520,6 +2629,11 @@ function createScenery(scene) {
   }
 
   scene.add(group);
+  // Remember the initial layout so restart() can restore it (the reset loop
+  // previously read userData.baseZ, which was never set — a silent no-op).
+  for (const item of group.children) {
+    item.userData.baseZ = item.position.z;
+  }
   group.userData.span = span;
   group.userData.lampMaterial = headMaterial;
   return group;
@@ -2888,10 +3002,13 @@ function createSimulation(canvas, hooks) {
   const egoBox = new THREE.Box3();
   const trafficBox = new THREE.Box3();
 
-  /** Axis-aligned car box centred at (x, z), padded y range for the 3D test. */
-  function setCarBox(box, x, z) {
-    box.min.set(x - CAR_HALF_X, 0.1, z - CAR_HALF_Z);
-    box.max.set(x + CAR_HALF_X, 1.5, z + CAR_HALF_Z);
+  /**
+   * Axis-aligned car box centred at (x, z), padded y range for the 3D test.
+   * Half extents are overridable so different vehicle types collide exactly.
+   */
+  function setCarBox(box, x, z, halfX = CAR_HALF_X, halfZ = CAR_HALF_Z) {
+    box.min.set(x - halfX, 0.1, z - halfZ);
+    box.max.set(x + halfX, 1.5, z + halfZ);
     return box;
   }
 
@@ -3170,6 +3287,25 @@ function createSimulation(canvas, hooks) {
       rails[0].position.x = -railX;
       rails[1].position.x = railX;
     }
+
+    // Keep CV/AI/LiDAR perception math calibrated to this road preset and the
+    // live camera intercept (previously these were hardcoded to the narrow preset).
+    syncPerceptionCalibration();
+  }
+
+  /** Re-derive the CV perception constants from the live camera + road preset. */
+  function syncPerceptionCalibration() {
+    const laneCentres = traffic?.laneCentres || activeRoadPreset.laneCentres;
+    setPerceptionCalibration({
+      // ImageData perception buffers are 4:3 center crops; canvases/images are
+      // stretched full-frame — both mappings are needed.
+      focalX: perceptionFocalCrop(camera.fov, camera.aspect),
+      focalFull: perceptionFocalX(camera.fov, camera.aspect),
+      dividerXs: laneCentres.length === 3
+        ? [(laneCentres[0] + laneCentres[1]) / 2, (laneCentres[1] + laneCentres[2]) / 2]
+        : activeRoadPreset.dividerXs,
+      roadHalfWidth: activeRoadPreset.roadWidth / 2 - 0.4,
+    });
   }
 
   function preseedTraffic() {
@@ -3258,10 +3394,13 @@ function createSimulation(canvas, hooks) {
       if (laneBlocked) continue;
 
       // Check multi-lane blockage constraint:
-      // Guarantee at least TWO open lanes in any 50m longitudinal slice so ego always has clear escape routes
+      // Guarantee at least ONE open corridor lane in any 50m slice AFTER this
+      // spawn: skip only when every lane except the one being filled is already
+      // blocked (the old `blockedNow >= 1` demanded an empty road and starved
+      // spawns under the dense traffic preset).
       if (customLane === null) {
         const blockedNow = countBlockedLanesAtZ(traffic.cars, laneCentres, candidateZ, 50);
-        if (blockedNow >= 1) {
+        if (blockedNow >= laneCentres.length - 1) {
           continue;
         }
       }
@@ -3312,6 +3451,30 @@ function createSimulation(canvas, hooks) {
     car.visible = false;
   }
 
+  /**
+   * Post-collision recovery: clear the cars sitting right in front of the
+   * respawn position. During the collision freeze, oncoming traffic keeps
+   * creeping toward the frozen ego, so after the unfreeze the corridor can
+   * read a blocked center lane at basically zero clearance. The ADAS brake
+   * ladder then suppresses throttle indefinitely ("the car never starts
+   * again") or a new car re-crashes the stalled car once immunity expires.
+   */
+  function releaseRespawnRunwayTraffic() {
+    for (const car of traffic.cars) {
+      if (!car.userData.active) continue;
+      const ahead = state.z - car.position.z;
+      // Center lane within the startup runway half-window: always released,
+      // because the ego respawns in the center lane.
+      if (Math.abs(car.position.x) < 0.8 && ahead > -8 && ahead < STARTUP_RUNWAY_CLEARANCE_M * 0.5) {
+        releaseTrafficCar(car);
+      } else if (ahead > -8 && ahead < 14) {
+        // Any lane immediately at/behind the bumper: released so nothing
+        // clips us the moment we roll.
+        releaseTrafficCar(car);
+      }
+    }
+  }
+
   function updateTraffic(dt) {
     for (const car of traffic.cars) {
       if (!car.userData.active) {
@@ -3319,7 +3482,10 @@ function createSimulation(canvas, hooks) {
       }
       car.position.z += car.userData.speed * dt; // towards the ego car
       if (car.userData.wheels) {
-        const rotSpeed = car.userData.speed * 2.8;
+        // Cars face local -z (headlights at z = -2.02), so rolling toward
+        // their travel direction (-z front, +z backward contact) needs the
+        // spin in the negative x sense; the old += made wheels roll backwards.
+        const rotSpeed = -car.userData.speed * 2.8;
         for (const wheel of car.userData.wheels) {
           wheel.rotation.x += rotSpeed * dt;
         }
@@ -3416,7 +3582,8 @@ function createSimulation(canvas, hooks) {
 
       ctrl = {
         steering: external.command.steering,
-        // Ensure adequate cruising throttle so the car has full steering authority and doesn't stall
+        // Cruise floor: the phone/model under-commands throttle; this keeps
+        // cruising speed and full steering authority (brake still applies).
         throttle: external.command.throttle > 0.05 ? Math.max(external.command.throttle, 0.42) : external.command.throttle,
         brake: external.command.brake,
         turn_signal: external.command.turn_signal,
@@ -3456,7 +3623,12 @@ function createSimulation(canvas, hooks) {
           corridorState.prevSteering = corridor.tacticalSteering;
 
           if (corridor.isManeuvering) {
-            const currClear = corridor.clearances ? corridor.clearances[corridor.currentLaneIdx] : 80;
+            // Keyed to the TARGET lane: during a lane change the corridor
+            // still classifies us in the lane being abandoned, whose
+            // clearance shrinks naturally as we pull out — braking on it
+            // caused the dip in mid-transit. What protects us is the gap
+            // in the lane we are moving into.
+            const currClear = corridor.clearances ? corridor.clearances[corridor.targetLaneIdx] : 80;
 
             let tacticalThrottle = ctrl.throttle;
             let tacticalBrake = ctrl.brake;
@@ -3502,7 +3674,12 @@ function createSimulation(canvas, hooks) {
             if (settings.biasCorrection) {
               const laneCenter = (traffic?.laneCentres || LANE_CENTRES)[corridor.currentLaneIdx] ?? 0;
               const drift = state.x - laneCenter;
-              cameraSteering = clamp(ctrl.steering - drift * 0.15 - state.heading * 0.40, -1, 1);
+              cameraSteering = clamp(
+                ctrl.steering
+                  - drift * ADAS_CENTERING_DRIFT_GAIN
+                  - state.heading * ADAS_CENTERING_HEADING_GAIN,
+                -1, 1,
+              );
             }
             const effectiveSignal = corridor.turnSignal !== 0 ? corridor.turnSignal : ctrl.turn_signal;
             return {
@@ -3538,6 +3715,14 @@ function createSimulation(canvas, hooks) {
       ctrl = PARKED_CONTROLS;
     }
 
+    // Launch assist (sim autopilot): a brief throttle floor during the first
+    // second after start/getRestart so the car starts rolling. The physics
+    // stay honest — speed is never rewritten directly.
+    if (settings.drivingMode === "sim" && state.time < 1.0 && state.time >= 0
+        && ctrl.brake < 0.5 && ctrl.throttle < 0.35) {
+      ctrl = { ...ctrl, throttle: 0.35 };
+    }
+
     if (settings.adasAvoidance && settings.obstacleSource !== "off" && (ctrl.throttle > 0 || state.speed > 0.5)) {
       let corridor = null;
       if (settings.obstacleSource === "ground_truth" && traffic) {
@@ -3570,7 +3755,10 @@ function createSimulation(canvas, hooks) {
         corridorState.lockedTargetLane = corridor.lockedTargetLane;
         corridorState.prevSteering = corridor.tacticalSteering;
         if (corridor.isManeuvering) {
-          const currClear = corridor.clearances ? corridor.clearances[corridor.currentLaneIdx] : 80;
+          // Keyed to the TARGET lane: what protects us mid-maneuver is
+          // the gap in the lane we are moving into, not the one being
+          // abandoned (whose clearance shrinks naturally as we pull out).
+          const currClear = corridor.clearances ? corridor.clearances[corridor.targetLaneIdx] : 80;
 
           let tacticalThrottle = ctrl.throttle;
           let tacticalBrake = ctrl.brake;
@@ -3690,6 +3878,15 @@ function createSimulation(canvas, hooks) {
       state.speed = 0;
       state.turnSignal = 0;
       state.pendingReset = false;
+      // A stale corridor lock (e.g. "move to lane 0" from the pre-crash plan)
+      // plus cars frozen at a few metres from the respawn point caused the
+      // "driving never restarts after a collision" symptom: the ADAS brake
+      // ladder suppressed throttle indefinitely. Clear both.
+      corridorState.lockedTargetLane = null;
+      corridorState.prevSteering = 0;
+      corridorState.blindSpotHolds = [0, 0, 0];
+      latestVisualObstacles = [];
+      releaseRespawnRunwayTraffic();
     }
 
     if (state.time < state.frozenUntil) {
@@ -3891,10 +4088,6 @@ function createSimulation(canvas, hooks) {
     const active = isSimActive();
 
     if (active) {
-      // User requirement: Start going with 10 km/h (2.78 m/s) at the beginning
-      if (state.speed < (10 / 3.6) && state.time <= 0.3) {
-        state.speed = 10 / 3.6;
-      }
       state.time += dt;
       updateEgoPhysics(dt);
       animateBlinkers(dt);
@@ -4005,6 +4198,9 @@ function createSimulation(canvas, hooks) {
     renderer.setSize(width, height, false);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
+    // The camera frustum (and therefore the pixel-to-angle intercept that the
+    // CV detector assumes) changed — re-derive the perception calibration.
+    syncPerceptionCalibration();
   }
 
   /**
@@ -4300,12 +4496,16 @@ function connectRenderSocket(hud) {
 
     socket.onclose = () => {
       attempt += 1;
-      const delay = nextReconnectDelayMs(attempt);
+      let delay = nextReconnectDelayMs(attempt);
       if (delay === null) {
-        hud.setStatus("قطع (تلاش ناموفق)", "disconnected");
-        return;
+        // Reconnect budget exhausted: instead of dying forever with a stale
+        // "قطع" status, fall back to a slow heartbeat retry.
+        attempt = 0;
+        delay = RECONNECT_MAX_DELAY_MS;
+        hud.setStatus("قطع (تلاش دوره‌ای…)", "disconnected");
+      } else {
+        hud.setStatus(`قطع (${attempt})`, "disconnected");
       }
-      hud.setStatus(`قطع (${attempt})`, "disconnected");
       setTimeout(connect, delay);
     };
   }
@@ -4558,6 +4758,7 @@ async function initAutopilot(simulation, sceneCanvas) {
   const driveBadge = document.getElementById("active-drive-source");
   const btnSourceCamera = document.getElementById("btn-source-camera");
   const btnSourceSim = document.getElementById("btn-source-sim");
+  const btnSourceKeyboard = document.getElementById("btn-source-keyboard");
   const sourceIndicator = document.getElementById("visual-source-indicator");
   const phoneSection = document.getElementById("phone-camera-mode-section");
   const phoneStatusBadge = document.getElementById("phone-running-status");
@@ -4681,19 +4882,46 @@ async function initAutopilot(simulation, sceneCanvas) {
   let frameCount = 0;
   let fps = 0;
   let isPredicting = false;
+  let firstInferenceDone = false;
 
   // 5. Driving Mode: Phone Camera (Dashboard) vs In-Browser Simulation Autopilot
   function setDrivingMode(mode) {
+    // Fresh corridor plan per controller: never reuse a lane lock or steering
+    // memory computed by a different driving mode.
+    if (simulation.corridorState) {
+      simulation.corridorState.lockedTargetLane = null;
+      simulation.corridorState.prevSteering = 0;
+      simulation.corridorState.blindSpotHolds = [0, 0, 0];
+    }
     simulation.settings.drivingMode = mode;
     if (mode === "sim") {
       btnSourceSim?.classList.add("is-active");
       btnSourceCamera?.classList.remove("is-active");
+      btnSourceKeyboard?.classList.remove("is-active");
       if (sourceIndicator) {
         sourceIndicator.textContent = "🎮 مدل شبیه‌ساز";
         sourceIndicator.className = "source-status-pill is-sim";
       }
       if (phoneSection) phoneSection.style.display = "none";
       if (simSection) simSection.style.display = "block";
+    } else if (mode === "manual") {
+      // Keyboard drives: no phone or DAVE-2 commands are followed.
+      simulation.settings.isBrowserAutopilotActive = false;
+      isActive = false;
+      if (autopilotBtn) {
+        autopilotBtn.classList.remove("is-on");
+        autopilotBtn.classList.add("is-off");
+        if (autopilotBtnText) autopilotBtnText.textContent = "شروع خودران (DAVE-2)";
+      }
+      btnSourceKeyboard?.classList.add("is-active");
+      btnSourceCamera?.classList.remove("is-active");
+      btnSourceSim?.classList.remove("is-active");
+      if (sourceIndicator) {
+        sourceIndicator.textContent = "⌨️ کیبورد دستی";
+        sourceIndicator.className = "source-status-pill is-sim";
+      }
+      if (phoneSection) phoneSection.style.display = "none";
+      if (simSection) simSection.style.display = "none";
     } else {
       // Default: "camera" (Phone Dashboard controls driving)
       simulation.settings.drivingMode = "camera";
@@ -4706,6 +4934,7 @@ async function initAutopilot(simulation, sceneCanvas) {
       }
       btnSourceCamera?.classList.add("is-active");
       btnSourceSim?.classList.remove("is-active");
+      btnSourceKeyboard?.classList.remove("is-active");
       if (sourceIndicator) {
         sourceIndicator.textContent = "📱 دوربین گوشی";
         sourceIndicator.className = "source-status-pill is-camera";
@@ -4717,6 +4946,7 @@ async function initAutopilot(simulation, sceneCanvas) {
 
   btnSourceCamera?.addEventListener("click", () => setDrivingMode("camera"));
   btnSourceSim?.addEventListener("click", () => setDrivingMode("sim"));
+  btnSourceKeyboard?.addEventListener("click", () => setDrivingMode("manual"));
   setDrivingMode("camera");
 
   function setPanelOpen(open) {
@@ -4749,6 +4979,9 @@ async function initAutopilot(simulation, sceneCanvas) {
           driveBadge.className = "drive-source-badge";
           driveBadge.innerHTML = '<span>🎮 منبع کنترل: <strong>مدل شبیه‌ساز (در انتظار فشردن شروع خودران)</strong></span>';
         }
+      } else if (mode === "manual") {
+        driveBadge.className = "drive-source-badge is-browser";
+        driveBadge.innerHTML = '<span>⌨️ منبع کنترل: <strong>رانندگی دستی با کیبورد فعال است</strong></span>';
       }
     }
 
@@ -4824,8 +5057,7 @@ async function initAutopilot(simulation, sceneCanvas) {
       await import("/static/client/js/inference.js");
 
     model = await loadModel(tf, MODEL_URL || "/static/client/models/dave2/model.json");
-    statusLabel.textContent = "مدل DAVE-2 آماده است ✓";
-    statusLabel.classList.add("is-ready");
+    statusLabel.textContent = "مدل بارگذاری شد — در انتظار اولین استنتاج…";
 
     async function sampleAndInfer() {
       if (!model || isPredicting) return;
@@ -4860,6 +5092,10 @@ async function initAutopilot(simulation, sceneCanvas) {
         } else {
           previewCtx.drawImage(sceneCanvas, sx, sy, sw, sh, 0, 0, 160, 120);
         }
+
+        // Raw pixel buffer of the preview frame; shared by CV detection,
+        // corridor estimating and the DAVE-2 tensor pipeline.
+        const imgData = previewCtx.getImageData(0, 0, 160, 120);
 
         const modeTag = document.getElementById("autopilot-mode-tag");
         if (modeTag) {
@@ -4905,8 +5141,6 @@ async function initAutopilot(simulation, sceneCanvas) {
               ADAS_LOOKAHEAD_HORIZON_M,
               simulation.corridorState?.lockedTargetLane,
               simulation.corridorState?.prevSteering || 0,
-              simulation.corridorState?.blindSpotHolds,
-              simulation.state.time,
             );
           } else {
             corridor = assessCorridorsFromVisualDetections(
@@ -4931,7 +5165,12 @@ async function initAutopilot(simulation, sceneCanvas) {
         if (corridorStatus && corridor) {
           const targetName = corridor.targetLaneIdx === 0 ? "چپ ◀" : (corridor.targetLaneIdx === 1 ? "وسط ■" : "راست ▶");
           const [lDist, cDist, rDist] = corridor.clearances.map(c => `${Math.round(c)}m`);
-          const modeLabel = adasSource === "vision" ? "👁️ بینایی تصویر" : "📡 رادار شبیه‌ساز";
+          const detectedWith = lastPerceptionSourceUsed();
+          const modeLabel = adasSource === "ground_truth" ? "📡 رادار شبیه‌ساز"
+            : adasSource === "lidar" ? "📡 لیدار"
+            : adasSource === "ai_vision"
+              ? (detectedWith === "ai" ? "🧠 هوش مصنوعی COCO" : "👁️ بینایی (جایگزین CV)")
+            : "👁️ بینایی تصویر";
           corridorStatus.textContent = `[${modeLabel}] مسیر: ${targetName} | L:${lDist} C:${cDist} R:${rDist}`;
           if (corridor.shouldAvoid) {
             corridorStatus.style.background = "rgba(239, 68, 68, 0.15)";
@@ -4970,6 +5209,14 @@ async function initAutopilot(simulation, sceneCanvas) {
         if (frameQueue.length === SEQUENCE_LENGTH) {
           const command = await realInference(tf, model, frameQueue);
 
+          // First successful closed-loop inference is the real "ready" moment:
+          // a model that loads but never infers must not report itself ready.
+          if (!firstInferenceDone) {
+            firstInferenceDone = true;
+            statusLabel.textContent = "مدل DAVE-2 آماده است ✓";
+            statusLabel.classList.add("is-ready");
+          }
+
           let effectiveSteering = command.steering;
           const isBiasCorrected = biasCheck ? biasCheck.checked : true;
           const bias = isBiasCorrected ? 0.080 : 0.0;
@@ -4983,6 +5230,8 @@ async function initAutopilot(simulation, sceneCanvas) {
 
           let finalSteering = effectiveSteering;
           let finalTurnSignal = command.turn_signal;
+          // Cruise floor: the DAVE-2 model under-commands throttle by design,
+          // so this floor is what keeps the closed loop at cruising speed.
           let finalThrottle = Math.max(command.throttle, 0.45);
           let finalBrake = command.brake > 0.4 ? command.brake : 0;
 
@@ -4990,7 +5239,10 @@ async function initAutopilot(simulation, sceneCanvas) {
             if (corridor.isManeuvering) {
               finalSteering = corridor.tacticalSteering;
               finalTurnSignal = corridor.turnSignal;
-              const currClear = corridor.clearances ? corridor.clearances[corridor.currentLaneIdx] : 80;
+              // Keyed to the TARGET lane: what protects us mid-maneuver is
+              // the gap in the lane we are moving into, not the one being
+              // abandoned (whose clearance shrinks naturally as we pull out).
+              const currClear = corridor.clearances ? corridor.clearances[corridor.targetLaneIdx] : 80;
               if (corridor.shouldAvoid) {
                 if (currClear < 14) {
                   finalThrottle = 0;
@@ -5015,7 +5267,12 @@ async function initAutopilot(simulation, sceneCanvas) {
             } else {
               const laneCenter = (simulation.traffic?.laneCentres || LANE_CENTRES)[corridor.currentLaneIdx] ?? 0;
               const drift = simulation.state.x - laneCenter;
-              finalSteering = clamp(effectiveSteering - drift * 0.20 - simulation.state.heading * 0.60, -1, 1);
+              finalSteering = clamp(
+                effectiveSteering
+                  - drift * ADAS_CENTERING_DRIFT_GAIN
+                  - simulation.state.heading * ADAS_CENTERING_HEADING_GAIN,
+                -1, 1,
+              );
               if (corridor.turnSignal !== 0) {
                 finalTurnSignal = corridor.turnSignal; // Early blinker before steering!
               }

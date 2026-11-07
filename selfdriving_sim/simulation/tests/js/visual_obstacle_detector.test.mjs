@@ -189,17 +189,18 @@ test("detectVisualObstacles correctly compensates for ego heading and lateral of
     data[i] = 36; data[i + 1] = 34; data[i + 2] = 32; data[i + 3] = 255;
   }
 
-  // Vehicle is at world X=0 (Center lane) at 25m.
-  // When ego turns left (heading = -0.18, egoX = -0.8):
-  // The vehicle shifts right in the camera image to x=89..92 at y=63..64
+  // Vehicle is at world X=0 (Center lane) at 22m.
+  // When ego turns left (heading = -0.18, egoX = -0.8), the vehicle shifts
+  // right in the camera image. Projection (focal=104 px): theta = (w-x0)/d - h
+  // = 0.8/22 + 0.18 = 0.216 -> centerX = 80 + 104*0.216 ~ 102.5 at y=63..64
   for (let y = 63; y <= 64; y++) {
-    for (let x = 89; x <= 92; x++) {
+    for (let x = 101; x <= 104; x++) {
       const idx = (y * width + x) * 4;
       data[idx] = 220; data[idx + 1] = 40; data[idx + 2] = 40; data[idx + 3] = 255;
     }
   }
 
-  // Without compensation, x=89..92 would falsely be marked as Right lane.
+  // Without compensation, x=101..104 would falsely be marked as Right lane.
   // With egoX=-0.8 and egoHeading=-0.18, it must correctly resolve to Center lane (1)!
   const detections = detectVisualObstacles({ width, height, data }, -0.8, -0.18);
   assert.equal(detections.length, 1);
@@ -381,9 +382,10 @@ test("detectVisualObstacles detects vehicles and avoids false positives on rainy
   const emptyDetections = detectVisualObstacles({ width, height, data }, 0, 0);
   assert.deepEqual(emptyDetections, []);
 
-  // 2. Add a vehicle in Left lane (x=71..74, y=62..64)
+  // 2. Add a vehicle in Left lane (worldX ~ -3.4 at 22m): theta = 3.4/22
+  // (focal=104) -> centerX = 80 - 16 ~ 64, so x=62..65 at y=62..64
   for (let y = 62; y <= 64; y++) {
-    for (let x = 71; x <= 74; x++) {
+    for (let x = 62; x <= 65; x++) {
       const idx = (y * width + x) * 4;
       data[idx] = 95; data[idx + 1] = 40; data[idx + 2] = 40; data[idx + 3] = 255;
     }
@@ -483,9 +485,11 @@ test("detectVisualObstacles detects yellow traffic car in right lane and green c
     data[i + 3] = 255;
   }
 
-  // 1. Yellow vehicle in Right lane at 22m (x=85..88, y=63..64)
-  for (let y = 63; y <= 64; y++) {
-    for (let x = 85; x <= 88; x++) {
+  // 1. Yellow vehicle in Right lane (worldX ~ +3.4) at 10m (y=68..70):
+  // theta = 3.4/10.5, focal=104 -> centerX ~ 114 (x=112..115). Closer rows
+  // keep every painted pixel inside the paved-road wedge (|worldX| <= 4.8)
+  for (let y = 68; y <= 70; y++) {
+    for (let x = 112; x <= 115; x++) {
       const idx = (y * width + x) * 4;
       data[idx] = 240;
       data[idx + 1] = 210;
@@ -493,9 +497,10 @@ test("detectVisualObstacles detects yellow traffic car in right lane and green c
     }
   }
 
-  // 2. Green vehicle in Left lane at 18m (x=72..75, y=64..66)
-  for (let y = 64; y <= 66; y++) {
-    for (let x = 72; x <= 75; x++) {
+  // 2. Green vehicle in Left lane (worldX ~ -3.4) at 10m (y=68..70):
+  // theta = -3.4/10.5, focal=104 -> centerX ~ 46 (x=45..48)
+  for (let y = 68; y <= 70; y++) {
+    for (let x = 45; x <= 48; x++) {
       const idx = (y * width + x) * 4;
       data[idx] = 50;
       data[idx + 1] = 160;
@@ -517,12 +522,12 @@ test("detectVisualObstacles detects yellow traffic car in right lane and green c
 
 test("detectObstaclesWithAI maps deep learning vehicle predictions to distance and lane corridors", async () => {
   const mockPredictions = [
-    // Center car at ~28m
+    // Center car: bbox center x=80 (theta=0), bottom y=65 -> ~20m
     { class: "car", score: 0.94, bbox: [76, 61, 8, 4] },
-    // Left lane truck at ~18m
-    { class: "truck", score: 0.88, bbox: [66, 63, 10, 6] },
-    // Right lane bus at ~30m
-    { class: "bus", score: 0.91, bbox: [86, 61, 7, 4] },
+    // Left lane truck: bbox center x=54 (theta=-0.25), bottom y=69 -> ~14m, worldX=-3.5
+    { class: "truck", score: 0.88, bbox: [49, 63, 10, 6] },
+    // Right lane bus: bbox center x=97.5 (theta=+0.168), bottom y=65 -> ~20m, worldX=+3.4
+    { class: "bus", score: 0.91, bbox: [94, 61, 7, 4] },
   ];
 
   const obstacles = await detectObstaclesWithAI({ mockPredictions }, 0, 0);
@@ -560,10 +565,10 @@ test("detectObstaclesWithAI rejects non-vehicle classes and low confidence detec
 
 test("detectObstaclesWithAI rejects detections outside highway road boundaries", async () => {
   const mockPredictions = [
-    // Far right roadside object (worldX > 5m)
-    { class: "car", score: 0.92, bbox: [130, 65, 12, 8] },
+    // Far right roadside object (worldX > 5m outside the paved preset)
+    { class: "car", score: 0.92, bbox: [148, 65, 10, 8] },
     // Far left roadside object (worldX < -5m)
-    { class: "car", score: 0.89, bbox: [20, 65, 12, 8] },
+    { class: "car", score: 0.89, bbox: [2, 65, 10, 8] },
   ];
 
   const obstacles = await detectObstaclesWithAI({ mockPredictions }, 0, 0);

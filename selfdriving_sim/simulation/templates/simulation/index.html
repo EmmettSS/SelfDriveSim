@@ -1147,6 +1147,9 @@
             <button type="button" id="btn-source-sim" class="source-toggle-btn" title="هدایت با مدل خودران شبیه‌ساز مستقیم روی تصویر جاده">
               <span>🎮 مدل شبیه‌ساز (Sim)</span>
             </button>
+            <button type="button" id="btn-source-keyboard" class="source-toggle-btn" title="رانندگی دستی با کیبورد (↑/W گاز، ←/→ فرمان)">
+              <span>⌨️ کیبورد دستی</span>
+            </button>
           </div>
 
           <!-- Section A: Phone Camera Driving Mode (Visible by default in Camera mode) -->
@@ -1191,7 +1194,7 @@
 
   <div id="hud-legend">
     <kbd>↑</kbd>/<kbd>W</kbd> گاز &nbsp;·&nbsp; <kbd>↓</kbd>/<kbd>S</kbd> ترمز &nbsp;·&nbsp; <kbd>←</kbd>/<kbd>→</kbd>/<kbd>A</kbd>/<kbd>D</kbd> فرمان &nbsp;·&nbsp; <kbd>U</kbd> آب‌وهوا
-    <span aria-hidden="true">·</span> بدون فرمان گوشی، کیبورد می‌راند
+    <span aria-hidden="true">·</span> برای رانندگی با کیبورد، حالت «⌨️ کیبورد دستی» را در پنل انتخاب کنید
     <button type="button" id="btn-restart-sim-legend" class="hud-button" title="شروع مجدد شبیه‌سازی">شروع مجدد ↻</button>
     <button type="button" id="screen-lock" class="hud-button" aria-pressed="false" title="قفل تصویر روی تمام صفحه (خروج: Esc)">تمام‌صفحه</button>
     <button type="button" id="qr-toggle" class="hud-button" aria-controls="qr-panel" aria-expanded="false">داشبورد گوشی (QR)</button>
@@ -1260,17 +1263,8 @@
         screenLock.hidden = true; // API unavailable: keyboard F11 remains
       }
 
-      // Restart buttons: call simulation.restart() or fallback to page reload
-      function triggerRestart() {
-        if (typeof window.restartSimulation === "function") {
-          window.restartSimulation();
-        } else {
-          window.location.reload();
-        }
-      }
-      for (const id of ["btn-restart-sim", "btn-restart-sim-legend"]) {
-        document.getElementById(id)?.addEventListener("click", triggerRestart);
-      }
+      // NB: restart buttons are bound inside scene.js boot(); binding them
+      // here as well made every click fire restart() twice.
     })();
   </script>
 
