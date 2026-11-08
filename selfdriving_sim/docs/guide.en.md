@@ -844,7 +844,7 @@ run can fill them.
 | Test suite | Result | Note |
 |---|---|---|
 | `pytest simulation client` | **77 passed, 2 skipped** | the skips are only the Redis tests, with no service reachable |
-| `npm test` (Node) | **167 passed, 0 failed** | scene (physics, wall, blinker, collisions, camera, ADAS, visual obstacle detection, popout view), inference, custom GRU, model contract |
+| `npm test` (Node) | **170 passed, 0 failed** | scene (physics, wall, blinker, collisions, camera, ADAS, visual obstacle detection, popout view, on-device mobile AI), inference, custom GRU, model contract |
 | `pytest models` | with the ML environment | checkpoint pins, graph restructuring, the four heads, conversion and parity |
 | WebSocket smoke test against a live server | all pass | command, telemetry, both hazards, a rejected hazard kind, a malformed command |
 | HTTP and static-asset smoke test | all `200` | `/`, `/dashboard/`, `scene.js`, `three.module.min.js`, `inference.js`, `model.json`, CSS |

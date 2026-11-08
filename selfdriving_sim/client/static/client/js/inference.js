@@ -390,6 +390,12 @@ export class DashboardController {
     this.dragStartPointer = null;
     this.dragStartRect = null;
     this.lastFrameStreamTime = 0;
+    this.streamCanvas = null;
+    this.streamCtx = null;
+    this.latestMobileObstacles = [];
+    this.lastMobileObstacleTime = 0;
+    this.mobileObstacleScanPending = false;
+    this.lastMobileScanTime = 0;
     this.screenSampler = createScreenSampler(this.ui["screen-canvas"]);
     this.cocoDetector = null;
     this.cocoLoading = false;
@@ -1665,22 +1671,47 @@ export class DashboardController {
       const sw = Math.max(10, Math.min(width - sx, (crop.x1 - crop.x0) * width));
       const sh = Math.max(10, Math.min(height - sy, (crop.y1 - crop.y0) * height));
       this.context.drawImage(this.video, sx, sy, sw, sh, 0, 0, FRAME_WIDTH, FRAME_HEIGHT);
+
+      // Dedicated high-resolution (320x240) perception canvas for crisp streaming and AI detection
+      if (!this.streamCanvas && typeof this.document?.createElement === "function") {
+        this.streamCanvas = this.document.createElement("canvas");
+        this.streamCanvas.width = 320;
+        this.streamCanvas.height = 240;
+        this.streamCtx = this.streamCanvas.getContext("2d", { willReadFrequently: true });
+      }
+      if (this.streamCtx) {
+        this.streamCtx.drawImage(this.video, sx, sy, sw, sh, 0, 0, 320, 240);
+      }
     } else {
       this.context.drawImage(this.video, 0, 0, FRAME_WIDTH, FRAME_HEIGHT);
+      if (!this.streamCanvas && typeof this.document?.createElement === "function") {
+        this.streamCanvas = this.document.createElement("canvas");
+        this.streamCanvas.width = 320;
+        this.streamCanvas.height = 240;
+        this.streamCtx = this.streamCanvas.getContext("2d", { willReadFrequently: true });
+      }
+      if (this.streamCtx) {
+        this.streamCtx.drawImage(this.video, 0, 0, 320, 240);
+      }
     }
 
     // Stream cropped camera feed from the mobile phone to the simulator via WebSocket (live browser only)
     if (typeof HTMLVideoElement !== "undefined" && this.video instanceof HTMLVideoElement) {
       const now = this.now();
-      if (!this.lastFrameStreamTime || now - this.lastFrameStreamTime >= 120) {
+      if (!this.lastFrameStreamTime || now - this.lastFrameStreamTime >= 100) {
         // ONLY send preview frame if the control socket has ZERO buffered data
         // This ensures camera frames never compete with, delay, or backpressure driving controls
         if (this.wsControl?.readyState === 1 && (this.wsControl.bufferedAmount || 0) === 0) {
           this.lastFrameStreamTime = now;
           try {
-            if (typeof this.canvas?.toDataURL === "function") {
-              const dataUrl = this.canvas.toDataURL("image/jpeg", 0.45);
-              this.wsControl.send(JSON.stringify({ type: "camera_frame", image: dataUrl }));
+            const streamTarget = this.streamCanvas || this.canvas;
+            if (typeof streamTarget?.toDataURL === "function") {
+              const dataUrl = streamTarget.toDataURL("image/jpeg", 0.60);
+              const payload = { type: "camera_frame", image: dataUrl };
+              if (Array.isArray(this.latestMobileObstacles) && this.latestMobileObstacles.length > 0) {
+                payload.obstacles = this.latestMobileObstacles;
+              }
+              this.wsControl.send(JSON.stringify(payload));
             }
           } catch {}
         }
@@ -1781,6 +1812,13 @@ export class DashboardController {
       this.setStatus("⚠ لنز دوربین مسدود است (تصویر تاریک) — توقف اضطراری خودرو");
       return;
     }
+
+    // Change 3: On-device mobile obstacle scanning directly on the phone
+    if (this.cocoDetector && (!this.lastMobileScanTime || now - this.lastMobileScanTime >= 200)) {
+      this.lastMobileScanTime = now;
+      void this.scanMobileObstacles();
+    }
+
     if (this.mode === "model") {
       this.modelTick(now);
       return;
@@ -1790,14 +1828,90 @@ export class DashboardController {
 
   /** Sends one command and updates the HUD. A failed send stops the loop. */
   dispatchCommand(output, now) {
-    if (!this.sendCommand(output)) {
+    let finalOutput = output;
+    if (Array.isArray(this.latestMobileObstacles) && this.latestMobileObstacles.length > 0) {
+      const nearestAhead = this.latestMobileObstacles.find((o) => o.distanceM < 42 && o.laneIdx === 1);
+      if (nearestAhead) {
+        finalOutput = { ...output };
+        finalOutput.throttle = Math.min(finalOutput.throttle, 0.35);
+        if (nearestAhead.distanceM < 16) {
+          finalOutput.brake = Math.max(finalOutput.brake, 0.75);
+          finalOutput.throttle = 0;
+        }
+        if (Math.abs(finalOutput.steering) < 0.25) {
+          finalOutput.steering = -0.45; // Evade to left lane
+          finalOutput.turn_signal = 1;
+        }
+        this.setStatus(`⚠️ هوش مصنوعی گوشی: مانع در ${nearestAhead.distanceM} متری (مسیر روبرو) — مانور فرار`);
+      }
+    }
+    if (!this.sendCommand(finalOutput)) {
       this.stopInferenceLoop("ارسال فرمان ناموفق بود؛ اتصال را بررسی کنید.", { sendStop: false });
       this.wsControl?.close(4000, "Control send failed");
       return false;
     }
-    this.updateIndicators(output);
+    this.updateIndicators(finalOutput);
     this.setText("fps-value", this.rate.sample(now, true));
     return true;
+  }
+
+  /**
+   * Scans the high-resolution cropped road canvas for vehicles directly on the mobile phone,
+   * avoiding network lag and providing zero-delay obstacle detections.
+   */
+  async scanMobileObstacles() {
+    if (!this.running || !this.cocoDetector || this.mobileObstacleScanPending) return;
+    const target = this.streamCanvas || this.canvas;
+    if (!target) return;
+    this.mobileObstacleScanPending = true;
+    try {
+      const preds = await this.cocoDetector.detect(target, 5, 0.28);
+      const valid = new Set(["car", "truck", "bus"]);
+      const detected = [];
+      const targetW = target.width || 320;
+      const targetH = target.height || 240;
+      const scaleX = 160 / targetW;
+      const scaleY = 120 / targetH;
+
+      for (const p of preds) {
+        const cls = (p.class || "").toLowerCase();
+        if (valid.has(cls) && (p.score || 0) >= 0.28) {
+          const [px, py, pw, ph] = p.bbox;
+          const bx = px * scaleX;
+          const by = py * scaleY;
+          const bw = pw * scaleX;
+          const bh = ph * scaleY;
+          if (bw < 3 || bh < 3) continue;
+
+          const yBottom = by + bh;
+          const dy = Math.max(yBottom - 59.5, 0.8);
+          const distGround = 100 / dy;
+          const distWidth = (1.8 * 140) / Math.max(bw, 1);
+          const distM = Math.max(1, Math.min(95, Math.round(distGround * 0.60 + distWidth * 0.40)));
+
+          const centerX = bx + bw / 2;
+          let laneIdx = 1;
+          if (centerX < 66) laneIdx = 0;
+          else if (centerX > 94) laneIdx = 2;
+
+          detected.push({
+            source: "mobile_ai",
+            class: cls,
+            score: +(p.score).toFixed(2),
+            distanceM: distM,
+            laneIdx,
+            laneName: ["چپ", "وسط", "راست"][laneIdx],
+            bbox: [Math.round(bx), Math.round(by), Math.round(bw), Math.round(bh)],
+          });
+        }
+      }
+      this.latestMobileObstacles = detected;
+      this.lastMobileObstacleTime = this.now();
+    } catch {
+      // Ignore detector errors
+    } finally {
+      this.mobileObstacleScanPending = false;
+    }
   }
 
   /**
@@ -1900,6 +2014,9 @@ export class DashboardController {
     this.model = null;
     this.cocoDetector?.dispose?.();
     this.cocoDetector = null;
+    this.streamCanvas = null;
+    this.streamCtx = null;
+    this.latestMobileObstacles = [];
     this.ui["btn-start"].removeEventListener("click", this.handlers.start);
     this.ui["btn-stop"].removeEventListener("click", this.handlers.stop);
     this.ui["btn-camera"].removeEventListener("click", this.handlers.camera);

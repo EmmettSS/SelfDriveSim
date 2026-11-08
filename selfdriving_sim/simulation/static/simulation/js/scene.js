@@ -48,17 +48,17 @@ export const MAX_TRAFFIC_CARS = 20;
 export const SPAWN_DELAY_MIN_S = 2.5;
 export const SPAWN_DELAY_MAX_S = 4.5;
 
-/** Traffic oncoming speed in units per second: 0.15 to 0.35 per frame at 60 Hz. */
-export const TRAFFIC_SPEED_MIN = 0.15 * FRAME_RATE_HZ;
-export const TRAFFIC_SPEED_MAX = 0.35 * FRAME_RATE_HZ;
+/** Traffic oncoming speed in units per second: calibrated for safe closing velocity & 3+ second reaction horizon. */
+export const TRAFFIC_SPEED_MIN = 0.08 * FRAME_RATE_HZ;
+export const TRAFFIC_SPEED_MAX = 0.18 * FRAME_RATE_HZ;
 
 /**
  * Traffic spawns this far *ahead* of the ego car (the car drives towards -z,
  * so "ahead" is a smaller z). A spawn is skipped when another car of the same
  * lane is closer than MIN_LANE_GAP_M.
  */
-export const SPAWN_GAP_MIN_M = 150;
-export const SPAWN_GAP_MAX_M = 200;
+export const SPAWN_GAP_MIN_M = 180;
+export const SPAWN_GAP_MAX_M = 240;
 export const MIN_LANE_GAP_M = 25;
 
 /** A traffic car is recycled once it is this far *behind* the ego car. */
@@ -4140,7 +4140,17 @@ function createSimulation(canvas, hooks) {
           renderPerceptionPreview(simulation);
         } else if (settings.obstacleSource === "ai_vision") {
           // Option A: Deep Learning Neural Network (COCO-SSD)
-          if (!isAiDetecting) {
+          const hasPhoneObstacles = (settings.drivingMode === "camera"
+            && Array.isArray(simulation?.latestPhoneObstacles)
+            && simulation.latestPhoneObstacles.length > 0
+            && (performance.now() - (simulation.lastPhoneObstacleTime || 0) < 1800));
+
+          if (hasPhoneObstacles) {
+            // Immediate zero-latency on-device phone detections!
+            latestVisualObstacles = trackAndSmoothObstacles(simulation.latestPhoneObstacles);
+            if (simulation) simulation.latestVisualObstacles = latestVisualObstacles;
+            renderPerceptionPreview(simulation);
+          } else if (!isAiDetecting) {
             isAiDetecting = true;
             const visualSource = (settings.drivingMode === "camera" && simulation?.phoneCameraReady && simulation?.phoneCameraImage && (performance.now() - (simulation.lastPhoneCameraTime || 0) < 5000))
               ? simulation.phoneCameraImage
@@ -4489,6 +4499,10 @@ function connectRenderSocket(hud) {
         }
         simulation.phoneCameraImage.src = message.image;
         simulation.lastPhoneCameraTime = performance.now();
+        if (Array.isArray(message.obstacles) && message.obstacles.length > 0) {
+          simulation.latestPhoneObstacles = message.obstacles;
+          simulation.lastPhoneObstacleTime = performance.now();
+        }
         return;
       }
       if (message.type !== "control_update") {

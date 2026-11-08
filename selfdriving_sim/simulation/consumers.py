@@ -164,10 +164,14 @@ class ControlConsumer(AsyncJsonWebsocketConsumer):
     async def receive_json(self, content, **kwargs):
         if isinstance(content, dict) and content.get("type") == "camera_frame":
             image = content.get("image")
-            if isinstance(image, str) and image.startswith("data:image/") and len(image) < 150000:
+            if isinstance(image, str) and image.startswith("data:image/") and len(image) < 250000:
+                payload = {"type": "camera.frame", "image": image}
+                obstacles = content.get("obstacles")
+                if isinstance(obstacles, list) and obstacles:
+                    payload["obstacles"] = obstacles[:10]
                 await self.channel_layer.group_send(
                     RENDER_GROUP,
-                    {"type": "camera.frame", "image": image},
+                    payload,
                 )
             return
 
@@ -236,7 +240,10 @@ class RenderConsumer(AsyncJsonWebsocketConsumer):
 
     async def camera_frame(self, event):
         """Forward phone camera frame to the browser renderer."""
-        await self.send_json({"type": "camera_frame", "image": event["image"]})
+        payload = {"type": "camera_frame", "image": event["image"]}
+        if "obstacles" in event and event["obstacles"]:
+            payload["obstacles"] = event["obstacles"]
+        await self.send_json(payload)
 
     async def receive(self, text_data=None, bytes_data=None, **kwargs):
         if text_data is None:

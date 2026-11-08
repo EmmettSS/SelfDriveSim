@@ -578,3 +578,36 @@ test("manual crop pointer dragging adjusts crop boundary handles and updates cap
   assert.equal(draws[1], Math.round(h.controller.tracker.rect.x0 * 1280));
 });
 
+test("scanMobileObstacles detects vehicles on-device and calculates distance and lane", async () => {
+  const h = await connected();
+  h.controller.running = true;
+  h.controller.cocoDetector = {
+    detect: async () => [
+      { class: "car", score: 0.85, bbox: [120, 140, 80, 60] }
+    ],
+  };
+
+  await h.controller.scanMobileObstacles();
+  assert.equal(h.controller.latestMobileObstacles.length, 1);
+  const obs = h.controller.latestMobileObstacles[0];
+  assert.equal(obs.class, "car");
+  assert.equal(obs.source, "mobile_ai");
+  assert.ok(obs.distanceM > 0 && obs.distanceM < 95);
+});
+
+test("dispatchCommand proactively alters steering and throttle when on-device obstacle is ahead", async () => {
+  const h = await connected();
+  h.controller.running = true;
+  h.controller.latestMobileObstacles = [
+    { distanceM: 25, laneIdx: 1, class: "car", score: 0.9 }
+  ];
+
+  const neutralCmd = { steering: 0, throttle: 0.5, brake: 0, turn_signal: 0 };
+  assert.equal(h.controller.dispatchCommand(neutralCmd, Date.now()), true);
+
+  const sent = h.sockets[0].sent.at(-1);
+  assert.ok(sent.steering < 0, "proactively steered left to evade");
+  assert.equal(sent.turn_signal, 1, "turn signal activated");
+  assert.ok(sent.throttle <= 0.35, "throttle reduced for safety");
+});
+

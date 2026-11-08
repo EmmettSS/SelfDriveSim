@@ -890,3 +890,54 @@ test("detectObstaclesWithAI returns empty array when no vehicles detected withou
   const result = await detectObstaclesWithAI({ mockPredictions: [] }, 0, 0);
   assert.deepEqual(result, []);
 });
+
+test("renderPerceptionPreview draws on-device phone obstacles and renders AI badge", () => {
+  const operations = [];
+  const mockCtx = {
+    save() {},
+    restore() {},
+    strokeRect() {},
+    fillRect() {},
+    fillText(text) { operations.push(`text:${text}`); },
+    beginPath() {},
+    moveTo() {},
+    lineTo() {},
+    stroke() {},
+    arc() {},
+    measureText() { return { width: 30 }; },
+    drawImage() {},
+  };
+
+  const mockCanvas = {
+    width: 320,
+    height: 240,
+    getContext: () => mockCtx,
+  };
+
+  const mockPanel = {
+    hidden: false,
+    classList: { contains: () => false },
+    querySelector: () => null,
+  };
+
+  const simulation = {
+    autopilotCanvas: mockCanvas,
+    testPanel: mockPanel,
+    renderer: { domElement: { width: 1280, height: 720 } },
+    latestVisualObstacles: [
+      {
+        source: "mobile_ai",
+        label: "خودرو (85%)",
+        distanceM: 32,
+        laneIdx: 1,
+        laneName: "وسط",
+        bbox: [60, 50, 40, 30],
+      }
+    ],
+    settings: { obstacleSource: "ai_vision", drivingMode: "camera" },
+    corridorState: { lockedTargetLane: 1 },
+  };
+
+  renderPerceptionPreview(simulation);
+  assert.ok(operations.some(op => op.includes("32m")));
+});

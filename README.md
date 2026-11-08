@@ -1,6 +1,6 @@
 # SelfDriveSim 🚗🤖
 
-[![Tests](https://img.shields.io/badge/tests-167%20node%20%7C%2077%20pytest%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-170%20node%20%7C%2077%20pytest%20passing-brightgreen.svg)]()
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)]()
 [![Django](https://img.shields.io/badge/django-channels%20%2B%20daphne-darkgreen.svg)]()
 [![TensorFlow.js](https://img.shields.io/badge/tfjs-DAVE--2--GRU%20%2B%20COCO--SSD-orange.svg)]()
@@ -146,7 +146,7 @@ python manage.py runsecure 0.0.0.0:8000
   ```bash
   cd selfdriving_sim
   npm test
-  # 167 / 167 unit tests passing
+  # 170 / 170 unit tests passing
   ```
 - **Python Backend & Django Channels Tests**:
   ```bash
@@ -260,7 +260,7 @@ python manage.py runsecure 0.0.0.0:8000
   ```bash
   cd selfdriving_sim
   npm test
-  # ۱۶۷ تست با موفقیت پاس شدند (167 passed)
+  # ۱۷۰ تست با موفقیت پاس شدند (170 passed)
   ```
 - **تست‌های پایتون و بک‌اند (Pytest)**:
   ```bash
