@@ -61,6 +61,10 @@ export const SPAWN_GAP_MIN_M = 180;
 export const SPAWN_GAP_MAX_M = 240;
 export const MIN_LANE_GAP_M = 25;
 
+/** Minimum longitudinal distance between ANY two traffic cars across all lanes (at least ~2.4 car lengths / 15m gap).
+ * Prevents cars from ever being generated, placed, or driving side by side. */
+export const MIN_TRAFFIC_SEPARATION_M = 15.0;
+
 /** A traffic car is recycled once it is this far *behind* the ego car. */
 export const DESPAWN_BEHIND_M = 15;
 
@@ -325,6 +329,42 @@ export function countBlockedLanesAtZ(cars, laneCentres, z, margin = 24, laneTol 
     }
   }
   return count;
+}
+
+/**
+ * Ensures traffic cars maintain safe longitudinal separation (at least ~2.4 cars distance / 15m)
+ * and never pull up side by side in any lane.
+ * Returns the effective speed the car should travel at during this time step.
+ *
+ * @param {Object} car - Traffic car to evaluate.
+ * @param {Array<Object>} allCars - Array of all traffic cars in simulation.
+ * @param {number} minSeparation - Minimum distance threshold in meters.
+ * @returns {number} Effective speed in units/second.
+ */
+export function calculateTrafficSeparationSpeed(car, allCars, minSeparation = MIN_TRAFFIC_SEPARATION_M) {
+  if (!car || !car.userData?.active) return 0;
+  const carZ = car.position.z;
+  const baseSpeed = car.userData.speed || TRAFFIC_SPEED_MIN;
+  let targetSpeed = baseSpeed;
+
+  if (Array.isArray(allCars)) {
+    for (const other of allCars) {
+      if (!other || other === car || !other.userData?.active) continue;
+      // Traffic moves towards +z; a car ahead has a larger z
+      const deltaZ = other.position.z - carZ;
+      if (deltaZ > 0 && deltaZ < minSeparation + 8.0) {
+        const otherSpeed = other.userData.speed || baseSpeed;
+        if (deltaZ <= minSeparation) {
+          // Too close (within 2 cars distance): decelerate to open up gap
+          targetSpeed = Math.min(targetSpeed, otherSpeed * 0.7);
+        } else {
+          // Approaching 2-car distance threshold: match speed of car ahead so they never draw level side-by-side
+          targetSpeed = Math.min(targetSpeed, otherSpeed);
+        }
+      }
+    }
+  }
+  return targetSpeed;
 }
 
 /**
@@ -3374,11 +3414,29 @@ function createSimulation(canvas, hooks) {
       return false;
     }
     const laneCentres = traffic.laneCentres || LANE_CENTRES;
-    const candidateZ = customZ !== null ? customZ : trafficSpawnZ(state.z, pickSpawnGap(Math.random, traffic.spawnGapMin, traffic.spawnGapMax));
+
+    // Determine candidateZ:
+    // If not customZ, pick a spawn Z that does not place the car within MIN_TRAFFIC_SEPARATION_M of ANY other car
+    let candidateZ = customZ;
+    if (candidateZ === null) {
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const testZ = trafficSpawnZ(state.z, pickSpawnGap(Math.random, traffic.spawnGapMin, traffic.spawnGapMax));
+        const hasConflict = traffic.cars.some(o => o !== car && o.userData?.active && Math.abs(o.position.z - testZ) < MIN_TRAFFIC_SEPARATION_M);
+        if (!hasConflict) {
+          candidateZ = testZ;
+          break;
+        }
+      }
+      if (candidateZ === null) {
+        releaseTrafficCar(car);
+        return false;
+      }
+    }
 
     // Determine viable lanes at candidateZ:
-    // 1. Must have no car in the same lane within MIN_LANE_GAP_M
-    // 2. Must keep at least ONE lane guaranteed open across the road:
+    // 1. Must have no car in ANY lane within MIN_TRAFFIC_SEPARATION_M (never side-by-side, >= 2 cars distance)
+    // 2. Must have no car in the same lane within MIN_LANE_GAP_M
+    // 3. Must keep at least ONE lane guaranteed open across the road:
     //    countBlockedLanesAtZ must remain < laneCentres.length - 1
     let candidateLanes = customLane !== null ? [customLane] : laneCentres;
     // User requirement: No cars spawn on the spawn lane (center lane) for the first 10 seconds
@@ -3392,10 +3450,16 @@ function createSimulation(canvas, hooks) {
     const allowedLanes = [];
 
     for (const laneX of candidateLanes) {
-      // Check collision/stacking in candidate lane
+      // Check collision/stacking in candidate lane and across road
       let laneBlocked = false;
       for (const other of traffic.cars) {
-        if (other !== car && other.userData.active) {
+        if (other !== car && other.userData?.active) {
+          // Never allow two cars to be side by side or placed within 2 cars distance across ANY lane
+          if (Math.abs(other.position.z - candidateZ) < MIN_TRAFFIC_SEPARATION_M) {
+            laneBlocked = true;
+            break;
+          }
+          // Same-lane minimum gap
           if (Math.abs(other.position.x - laneX) < 0.6 && Math.abs(other.position.z - candidateZ) < MIN_LANE_GAP_M) {
             laneBlocked = true;
             break;
@@ -3405,10 +3469,7 @@ function createSimulation(canvas, hooks) {
       if (laneBlocked) continue;
 
       // Check multi-lane blockage constraint:
-      // Guarantee at least ONE open corridor lane in any 50m slice AFTER this
-      // spawn: skip only when every lane except the one being filled is already
-      // blocked (the old `blockedNow >= 1` demanded an empty road and starved
-      // spawns under the dense traffic preset).
+      // Guarantee at least ONE open corridor lane in any 50m slice AFTER this spawn
       if (customLane === null) {
         const blockedNow = countBlockedLanesAtZ(traffic.cars, laneCentres, candidateZ, 50);
         if (blockedNow >= laneCentres.length - 1) {
@@ -3419,6 +3480,7 @@ function createSimulation(canvas, hooks) {
     }
 
     if (allowedLanes.length === 0) {
+      releaseTrafficCar(car);
       return false;
     }
 
@@ -3491,12 +3553,13 @@ function createSimulation(canvas, hooks) {
       if (!car.userData.active) {
         continue;
       }
-      car.position.z += car.userData.speed * dt; // towards the ego car
+      const speed = calculateTrafficSeparationSpeed(car, traffic.cars, MIN_TRAFFIC_SEPARATION_M);
+      car.position.z += speed * dt; // towards the ego car
       if (car.userData.wheels) {
         // Cars face local -z (headlights at z = -2.02), so rolling toward
         // their travel direction (-z front, +z backward contact) needs the
         // spin in the negative x sense; the old += made wheels roll backwards.
-        const rotSpeed = -car.userData.speed * 2.8;
+        const rotSpeed = -speed * 2.8;
         for (const wheel of car.userData.wheels) {
           wheel.rotation.x += rotSpeed * dt;
         }
