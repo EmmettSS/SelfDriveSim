@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>پروپوزال پروژه SelfDriveSim | شبیه‌ساز راننده خودران</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    /* ============ Reset & Base ============ */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; font-size: 16px; }
+    body {
+      font-family: 'Vazirmatn', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%);
+      color: #f8fafc;
+      line-height: 1.7;
+      direction: rtl;
+      text-align: right;
+      min-height: 100vh;
+    }
+
+    /* ============ Typography ============ */
+    h1, h2, h3, h4 { font-weight: 700; line-height: 1.3; }
+    p { margin-bottom: 1rem; }
+    a { color: #38bdf8; text-decoration: none; transition: color 0.2s; }
+    a:hover { color: #818cf8; text-decoration: underline; }
+    .btn-link {
+      display: inline-block; padding: 0.6rem 1.2rem;
+      background: rgba(56, 189, 248, 0.1); color: #38bdf8;
+      border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 8px;
+      font-weight: 600;
+    }
+    .btn-link:hover { background: rgba(56, 189, 248, 0.2); color: #bae6fd; }
+
+    /* ============ Layout ============ */
+    .container { max-width: 1200px; margin: 0 auto; padding: 0 1.5rem; }
+    section { padding: 5rem 0; }
+
+    /* ============ Header / Nav ============ */
+    header {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(15, 23, 42, 0.8);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+    }
+    .navbar {
+      display: flex; align-items: center; justify-content: space-between;
+      height: 72px;
+    }
+    .logo { display: flex; align-items: center; gap: 0.75rem; font-weight: 800; font-size: 1.5rem; color: #fff; }
+    .logo .mark {
+      width: 36px; height: 36px;
+      background: linear-gradient(135deg, #38bdf8, #818cf8);
+      border-radius: 10px; display: flex; align-items: center; justify-content: center;
+      font-size: 1.2rem; color: #020617;
+    }
+    .nav-links { display: flex; gap: 1.5rem; list-style: none; }
+    .nav-links a { color: #cbd5e1; font-weight: 500; font-size: 0.95rem; }
+    .nav-links a:hover { color: #fff; }
+
+    /* ============ Hero ============ */
+    .hero {
+      position: relative; padding: 9rem 0 6rem; overflow: hidden;
+      background: radial-gradient(ellipse 80% 50% at 70% 0%, rgba(56,189,248,0.15), transparent 40%),
+                  radial-gradient(ellipse 60% 40% at 30% 100%, rgba(129,140,248,0.15), transparent 40%);
+    }
+    .hero-grid { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 3rem; align-items: center; }
+    .hero h1 { font-size: clamp(2rem, 5vw, 3.5rem); margin-bottom: 1.25rem; line-height: 1.15; }
+    .hero .badge {
+      display: inline-block; padding: 0.5rem 1rem;
+      background: rgba(56,189,248,0.15); border: 1px solid rgba(56,189,248,0.35);
+      color: #38bdf8; border-radius: 999px; font-weight: 700; font-size: 0.85rem; margin-bottom: 1.5rem;
+    }
+    .hero p { font-size: 1.15rem; color: #94a3b8; margin-bottom: 2rem; max-width: 620px; }
+    .hero-actions { display: flex; gap: 1rem; flex-wrap: wrap; }
+    .btn-primary {
+      background: linear-gradient(135deg, #38bdf8, #818cf8); color: #020617;
+      padding: 0.9rem 1.75rem; border-radius: 10px; font-weight: 700; border: none;
+      cursor: pointer; box-shadow: 0 10px 25px -5px rgba(56,189,248,0.35);
+      transition: transform 0.2s, filter 0.2s;
+    }
+    .btn-primary:hover { transform: translateY(-2px); filter: brightness(1.1); }
+    .btn-ghost {
+      background: rgba(255,255,255,0.08); color: #fff; padding: 0.9rem 1.75rem;
+      border-radius: 10px; font-weight: 700; border: 1px solid rgba(255,255,255,0.15);
+      cursor: pointer; transition: background 0.2s;
+    }
+    .btn-ghost:hover { background: rgba(255,255,255,0.15); }
+
+    .hero-visual {
+      position: relative; height: 340px; border-radius: 20px;
+      background: linear-gradient(135deg, #0f172a, #1e293b);
+      border: 1px solid rgba(255,255,255,0.08);
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden;
+    }
+    .hero-visual::before {
+      content: "SelfDriveSim"; position: absolute; font-size: clamp(1.5rem, 4vw, 3rem);
+      font-weight: 800; color: rgba(255,255,255,0.06); opacity: 0.5;
+    }
+    .chip-row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 2rem; }
+    .chip {
+      background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08);
+      color: #cbd5e1; padding: 0.4rem 0.9rem; border-radius: 999px;
+      font-size: 0.82rem; font-weight: 500;
+    }
+
+    /* ============ Section Headers ============ */
+    .section-header { text-align: center; margin-bottom: 3.5rem; }
+    .section-header .kicker {
+      display: inline-block; color: #38bdf8; font-weight: 700; font-size: 0.9rem;
+      text-transform: uppercase; letter-spacing: 0.14em; margin-bottom: 0.75rem;
+    }
+    .section-header h2 { font-size: clamp(1.75rem, 3vw, 2.5rem); color: #fff; margin-bottom: 1rem; }
+    .section-header p { color: #94a3b8; max-width: 700px; margin: 0 auto; font-size: 1.05rem; }
+
+    /* ============ Cards Grid ============ */
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.75rem; }
+    .card {
+      background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 16px; padding: 1.75rem; transition: transform 0.25s, border-color 0.25s;
+      backdrop-filter: blur(6px);
+    }
+    .card:hover { transform: translateY(-6px); border-color: rgba(56,189,248,0.35); }
+    .card .icon { font-size: 1.9rem; margin-bottom: 1rem; display: inline-block; }
+    .card h3 { color: #fff; font-size: 1.2rem; margin-bottom: 0.75rem; }
+    .card p { color: #94a3b8; font-size: 0.95rem; }
+
+    /* ============ Features Grid ============ */
+    .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1.5rem; }
+    .feat {
+      background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 14px; padding: 1.5rem;
+    }
+    .feat .tag { font-size: 0.78rem; font-weight: 700; color: #818cf8; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.6rem; display: block; }
+    .feat h4 { color: #fff; font-size: 1.05rem; margin-bottom: 0.5rem; }
+    .feat p { color: #94a3b8; font-size: 0.9rem; }
+
+    /* ============ Tables ============ */
+    .table-wrap { overflow-x: auto; margin-bottom: 2rem; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+    th, td { padding: 0.9rem 1rem; text-align: right; border-bottom: 1px solid rgba(255,255,255,0.06); }
+    th { background: rgba(255,255,255,0.04); color: #94a3b8; font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,0.03); }
+
+    /* ============ Architecture Diagram ============ */
+    .arch {
+      background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px; padding: 2rem; margin-bottom: 2rem;
+      font-size: 0.9rem; color: #cbd5e1;
+    }
+    .arch .row { display: flex; justify-content: space-between; margin-bottom: 1.2rem; align-items: center; }
+    .arch .col { flex: 1; text-align: center; padding: 1rem; background: rgba(255,255,255,0.03); border-radius: 10px; border: 1px dashed rgba(255,255,255,0.08); }
+    .arch .arrow { color: #38bdf8; font-weight: 800; font-size: 1.4rem; white-space: nowrap; }
+    .arch .note { margin-top: 1rem; font-size: 0.85rem; color: #94a3b8; }
+
+    /* ============ Roadmap ============ */
+    .roadmap { position: relative; padding-left: 2.5rem; }
+    .roadmap::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: linear-gradient(180deg, #38bdf8, #818cf8); border-radius: 2px; }
+    .roadmap .step { position: relative; margin-bottom: 2.5rem; }
+    .roadmap .dot {
+      position: absolute; left: -2.5rem; top: 0.3rem; width: 14px; height: 14px;
+      background: #38bdf8; border-radius: 50%; border: 3px solid #0f172a; z-index: 2;
+    }
+    .roadmap h4 { color: #fff; margin-bottom: 0.4rem; }
+    .roadmap .meta { color: #38bdf8; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.4rem; display: block; }
+    .roadmap p { color: #94a3b8; font-size: 0.95rem; margin-bottom: 0.5rem; }
+
+    /* ============ Team ============ */
+    .team-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.5rem; }
+    .member { text-align: center; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 1.5rem; }
+    .member .avatar { width: 72px; height: 72px; border-radius: 50%; margin: 0 auto 1rem; background: linear-gradient(135deg,#38bdf8,#818cf8); display: flex; align-items: center; justify-content: center; font-size: 1.6rem; color: #020617; font-weight: 800; }
+    .member h4 { color: #fff; margin-bottom: 0.25rem; }
+    .member .role { color: #94a3b8; font-size: 0.88rem; margin-bottom: 0.75rem; display: block; }
+    .member ul { list-style: none; color: #94a3b8; font-size: 0.85rem; text-align: right; }
+    .member li { margin-bottom: 0.35rem; }
+
+    /* ============ KPI ============ */
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.25rem; }
+    .kpi { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 1.5rem; text-align: center; }
+    .kpi .value { font-size: 2.2rem; font-weight: 800; color: #38bdf8; display: block; }
+    .kpi .label { color: #94a3b8; font-size: 0.9rem; margin-top: 0.35rem; }
+
+    /* ============ CTA ============ */
+    .cta {
+      background: linear-gradient(135deg, #38bdf8 0%, #818cf8 100%); color: #020617;
+      border-radius: 20px; padding: 4rem 2rem; text-align: center; margin-top: 1rem;
+    }
+    .cta h2 { color: #020617; margin-bottom: 1rem; font-size: 2rem; }
+    .cta p { color: #0f172a; margin-bottom: 2rem; font-size: 1.1rem; font-weight: 600; }
+    .cta .btn { background: #020617; color: #fff; padding: 1rem 2.25rem; border-radius: 12px; font-weight: 700; border: none; cursor: pointer; font-size: 1rem; }
+    .cta .btn:hover { background: #334155; }
+
+    /* ============ Footer ============ */
+    footer { border-top: 1px solid rgba(255,255,255,0.08); padding: 3rem 0 2rem; color: #64748b; font-size: 0.9rem; text-align: center; }
+    footer a { color: #94a3b8; }
+
+    /* ============ Responsive ============ */
+    @media (max-width: 900px) {
+      .hero-grid { grid-template-columns: 1fr; gap: 2.5rem; }
+      .hero { padding: 7rem 0 4rem; }
+      .hero-visual { height: 260px; }
+      .nav-links { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header -->
+  <header>
+    <div class="container">
+      <div class="navbar">
+        <div class="logo">
+          <div class="mark">S</div>
+          <div>SelfDriveSim</div>
+        </div>
+        <ul class="nav-links">
+          <li><a href="#about">درباره پروژه</a></li>
+          <li><a href="#features">ویژگی‌ها</a></li>
+          <li><a href="#architecture">معماری</a></li>
+          <li><a href="#roadmap">نقشه راه</a></li>
+          <li><a href="#team">تیم</a></li>
+          <li><a href="#contact">تماس</a></li>
+        </ul>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container">
+      <div class="hero-grid">
+        <div>
+          <div class="badge">پروژه دانشجویی · استارتاپی</div>
+          <h1>SelfDriveSim<br>شبیه‌ساز مداربسته سرتاسری راننده خودران</h1>
+          <p>یک پلتفرم کامل، با هزینه پایین و تست‌پذیر برای آموزش، نمونه‌سازی و آزمایش الگوریتم‌های راننده خودران روی سخت‌افزار روزمره: یک رایانه، یک تلفن همراه و یک شبکه وای‌فای محلی.</p>
+          <div class="hero-actions">
+            <a href="https://github.com/EmmettSS/SelfDriveSim" class="btn-primary" target="_blank" rel="noopener">مخزن پروژه در GitHub</a>
+            <a href="#download" class="btn-ghost">دانلود پروپوزال</a>
+          </div>
+          <div class="chip-row">
+            <span class="chip">Python 3.11/3.12</span>
+            <span class="chip">Django + Daphne</span>
+            <span class="chip">Three.js r160</span>
+            <span class="chip">TensorFlow.js</span>
+            <span class="chip">WebSocket ۲۰Hz</span>
+          </div>
+        </div>
+        <div class="hero-visual" title="SelfDriveSim">
+          <span style="font-size:4rem;">🚗🤖</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- About -->
+  <section id="about">
+    <div class="container">
+      <div class="section-header">
+        <span class="kicker">درباره پروژه</span>
+        <h2>چرا SelfDriveSim؟</h2>
+        <p>ساخت و آزمایش سیستم‌های راننده خودکار یکی از چالش‌های مهم در مهندسی هوش مصنوعی و خودرو است، اما هزینه تجهیزات گران‌قیمت، سنسور LiDAR و مجوزهای راه‌مرور مانع دسترسی بسیاری از دانشجویان و پژوهشگران است. SelfDriveSim پاسخ این مشکل است: یک پلتفرم کاملاً بر پایه مرورگر بدون نیاز به تجهیزات ویژه.</p>
+      </div>
+      <div class="cards">
+        <div class="card">
+          <div class="icon">💻</div>
+          <h3>بدون هزینه سخت‌افزار ویژه</h3>
+          <p>اجرا کامل روی سخت‌افزار consumer؛ بدون نیاز به GPU گران‌قیمت، LiDAR یا خودرو واقعی.</p>
+        </div>
+        <div class="card">
+          <div class="icon">🌐</div>
+          <h3>کاملاً آلفلاین و محلی</h3>
+          <p>مدل‌ها و کتابخانه‌ها (Three.js، TensorFlow.js) به‌صورت محلی در مخزن قرار دارند؛ بدون نیاز به اینترنت یا CDN.</p>
+        </div>
+        <div class="card">
+          <div class="icon">🧪</div>
+          <h3>تست‌پذیری بالا</h3>
+          <p>۱۶۷ تست واحد جاوااسکریپت و ۷۷ تست بک‌اند پایتون با نرخ عبور بالا؛ CI/CD آماده.</p>
+        </div>
+        <div class="card">
+          <div class="icon">📱</div>
+          <h3>دو دستگاه</h3>
+          <p>PC برای شبیه‌سازی سه‌بعدی و تلفن همراه برای کنترل خودران از طریق دوربین و مرورگر.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section id="features" style="background: rgba(255,255,255,0.02);">
+    <div class="container">
+      <div class="section-header">
+        <span class="kicker">قدرت تکنولوژی</span>
+        <h2>ویژگی‌ها و قابلیت‌های کلیدی</h2>
+        <p>سیستم هوشمند برای education و prototyping الگوریتم‌های راننده خودران.</p>
+      </div>
+      <div class="features">
+        <div class="feat">
+          <span class="tag">هوش مصنوعی</span>
+          <h4>مدل DAVE-2-GRU در مرورگر</h4>
+          <p>شبکه کانولوشنی-تکرارشونده ۳-فریمی با TensorFlow.js که ۴ فرمان راننده (فرمان، گاز، ترمز، راهنما) پیش‌بینی می‌کند.</p>
+        </div>
+        <div class="feat">
+          <span class="tag">ادراک چندحسی</span>
+          <h4>سیستم ADAS با ۴ حالت</h4>
+          <p>COCO-SSD، بینایی ماشین خالص، لیدار مجازی تا ۶۰ متر و رادر ground-truth با کریدور ایمنی.</p>
+        </div>
+        <div class="feat">
+          <span class="tag">ایمنی</span>
+          <h4>محافظ انسداد لنز</h4>
+          <p>تشخیص تار یا پوشش لنز دوربین گوشی و متوقف‌سازی خودکار خودران برای ایمنی.</p>
+        </div>
+        <div class="feat">
+          <span class="tag">ارتباط</span>
+          <h4>WebSocket ۲۰ هرتزی</h4>
+          <p>رله فرمان از طریق Django Channels + Daphne با لایه پاسخ Redis؛ تاخیر ۶۰–۱۲۰ms.</p>
+        </div>
+        <div class="feat">
+          <span class="tag">نمایشگر</span>
+          <h4>HUD گسترش‌پذیر</h4>
+          <p>نمایشگر اطلاعات پروازی با حالت‌های ۱x، ۱.۵x و سینمایی ۶۴۰ پیکسلی.</p>
+        </div>
+        <div class="feat">
+          <span class="tag">اجرای سریع</span>
+          <h4>اسکریپت یک‌کلیکی</h4>
+          <p>start.bat / run.sh و گواهی HTTPS خودکار (runsecure) برای دسترسی دوربین موبایل.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Architecture -->
+  <section id="architecture">
+    <div class="container">
+      <div class="section-header">
+        <span class="kicker">معماری سیستم</span>
+        <h2>چگونه کار می‌کند</h2>
+        <p>حلقه مداربسته بین دو دستگاه: PC (شبیه‌ساز) و تلفن همراه (کنترل خودران). فقط چهار عدد کنترل روی شبکه محلی جابجا می‌شوند؛ هیچ فریم تصویر خارج نمی‌شود.</p>
+      </div>
+      <div class="arch">
+        <div class="row">
+          <div class="col">
+            <div style="font-size:1.5rem; margin-bottom:0.5rem;">💻</div>
+            <div style="font-weight:700; color:#fff;">PC — شبیه‌ساز</div>
+            <div style="font-size:0.85rem; color:#94a3b8;">Three.js · فزیک · برخورد · HUD</div>
+          </div>
+          <div class="arrow">⇄</div>
+          <div class="col">
+            <div style="font-size:1.5rem; margin-bottom:0.5rem;">📱</div>
+            <div style="font-weight:700; color:#fff;">گوشی — کنترل خودران</div>
+            <div style="font-size:0.85rem; color:#94a3b8;">دوربین · TensorFlow.js · WebSocket</div>
+          </div>
+        </div>
+        <div class="row" style="justify-content:center;">
+          <div class="col" style="max-width:600px;">
+            <div style="font-weight:700; color:#38bdf8; margin-bottom:0.5rem;">شبکه وای‌فای محلی · Django Channels + Daphne + Redis</div>
+            <div style="font-size:0.85rem; color:#94a3b8;">/ws/control/ (گوشی → PC · ۲۰Hz) · /ws/render/ (PC → گوشی · ۴Hz تلومتری/هشدار)</div>
+          </div>
+        </div>
+        <div class="note">هیچ فریم تصویر از گوشی خارج نمی‌شود؛ فقط فرمان steering, throttle, brake, turn_signal روی LAN منتقل می‌شود.</div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>بخش</th><th>محل اجرا</th><th>نقش</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>PC (شبیه‌ساز)</td><td>رایانه شخصی</td><td>صحنه سه‌بعدی Three.js، فزیک خودرو، برخورد، HUD، تلومتری</td></tr>
+            <tr><td>گوشی (کنترل خودران)</td><td>تلفن همراه</td><td>دوربین پشت، مدل DAVE-2-GRU، ارسال فرمان ۲۰ بار در ثانیه</td></tr>
+            <tr><td>سرور</td><td>PC محلی (Daphne ASGI)</td><td>رله WebSocket، گروه simulation_render، لایه پاسخ Redis</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- Roadmap -->
+  <section id="roadmap">
+    <div class="container">
+      <div class="section-header">
+        <span class="kicker">برنامه زمانی</span>
+        <h2>نقشه راه اجرا (۴ ماه / یک ترم)</h2>
+        <p>پروژه در چهار فاز پیش می‌رود تا نسخه نهایی و مستندizado تحویل شود.</p>
+      </div>
+      <div class="roadmap">
+        <div class="step">
+          <div class="dot"></div>
+          <span class="meta">فاز ۱ · ۲ هفته</span>
+          <h4>تحلیل و طراحی</h4>
+          <p>بررسی نیازها، طراحی معماری، انتخاب تکنولوژی، طراحی پروتکل و پایگاه داده.</p>
+        </div>
+        <div class="step">
+          <div class="dot"></div>
+          <span class="meta">فاز ۲ · ۶ هفته</span>
+          <h4>توسعه Core</h4>
+          <p>پیاده‌سازی Three.js، WebSocket Django Channels، مدل DAVE-2-GRU، داشبورد موبایل.</p>
+        </div>
+        <div class="step">
+          <div class="dot"></div>
+          <span class="meta">فاز ۳ · ۴ هفته</span>
+          <h4>ایمنی و ADAS</h4>
+          <p>محافظ لنز، ۴ حالت ADAS، کالیبراسیون ۶ نقطه‌ای، HUD شناور.</p>
+        </div>
+        <div class="step">
+          <div class="dot"></div>
+          <span class="meta">فاز ۴ · ۴ هفته</span>
+          <h4>تست و تهدف‌سازی</h4>
+          <p>تست واحد، تست حلقه‌بسته، بهینه‌سازی تاخیر، مستندسازی نهایی.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- KPI -->
+  <section style="padding: 4rem 0 1rem;">
+    <div class="container">
+      <div class="section-header" style="margin-bottom:2rem;">
+        <span class="kicker">سنجه‌های عملکردی</span>
+        <h2>مقاصد و شاخص‌ها</h2>
+      </div>
+      <div class="kpi-grid">
+        <div class="kpi"><span class="value">۶۰–۱۲۰ ms</span><span class="label">تاخیر end-to-end (دوربین تا پیکسل)</span></div>
+        <div class="kpi"><span class="value">~۲۰/ثانیه</span><span class="label">نرخ فرمان موبایل</span></div>
+        <div class="kpi"><span class="value">≥ ۳۰ FPS</span><span class="label">سرعت رندر صحنه روی PC</span></div>
+        <div class="kpi"><span class="value">> ۹۰٪</span><span class="label">نسبت ماندن در جاده (۵ دقیقه)</span></div>
+        <div class="kpi"><span class="value">۱۶۷ + ۷۷</span><span class="label">تست یکپارچه (جاوااسکریپت + پایتون)</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Team -->
+  <section id="team" style="background: rgba(255,255,255,0.02);">
+    <div class="container">
+      <div class="section-header">
+        <span class="kicker">تیم توسعه</span>
+        <h2>تیم استارتاپی</span>
+        <p>گروهی برای ساخت پلتفرم خودران با تمرکز بر سرعت، ایمنی و دسترسی Democratized.</p>
+      </div>
+      <div class="team-grid">
+        <div class="member">
+          <div class="avatar">PM</div>
+          <h4>مدیر محصول</h4>
+          <span class="role">مدیریت پروژه</span>
+          <ul>
+            <li>برنامه‌ریزی و هماهنگی</li>
+            <li>مستندسازی پروژه</li>
+            <li>ارتباط با دانشگاه</li>
+          </ul>
+        </div>
+        <div class="member">
+          <div class="avatar">BE</div>
+          <h4>توسعه‌دهنده بک‌اند</h4>
+          <span class="role">Django/Channels</span>
+          <ul>
+            <li>WebSocket و consumer</li>
+            <li>API و امنیت</li>
+            <li>لایه پاسخ Redis</li>
+          </ul>
+        </div>
+        <div class="member">
+          <div class="avatar">FE</div>
+          <h4>توسعه‌دهنده فرانت‌اند</h4>
+          <span class="role">Three.js/JS</span>
+          <ul>
+            <li>صحنه ۳D و HUD</li>
+            <li>scene.js و انیمیشن</li>
+            <li>رابط کاربری داشبورد</li>
+          </ul>
+        </div>
+        <div class="member">
+          <div class="avatar">ML</div>
+          <h4>مهندس یادگیری ماشین</h4>
+          <span class="role">ML/Client-side</span>
+          <ul>
+            <li>مدل DAVE-2-GRU</li>
+            <li>TensorFlow.js و تبدیل مدل</li>
+            <li>استنتاج کلاینت‌ساید</li>
+          </ul>
+        </div>
+        <div class="member">
+          <div class="avatar">QA</div>
+          <h4>آزمایش و QA</h4>
+          <span class="role">تست و کیفیت</span>
+          <ul>
+            <li>تست unit و integrate</li>
+            <li>تست حلقه‌بسته واقعی</li>
+            <li>گزارش باگ و KPI</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Market/Commercial -->
+  <section id="market">
+    <div class="container">
+      <div class="section-header">
+        <span class="kicker">ارزش تجاری</span>
+        <h2>بازار هدف و مدل درآمدی</span>
+        <p>SelfDriveSim برای دانشگاه‌ها، استارتاب‌های خودران و آموزشگاه‌های رانندگی طراحی شده است.</p>
+      </div>
+      <div class="cards">
+        <div class="card">
+          <div class="icon">🎓</div>
+          <h3>دانشگاه و آموزشگاه</h3>
+          <p>محیط آموزش با هزینه پایین برای کلاس‌های هوش مصنوعی و راننده خودکار.</p>
+        </div>
+        <div class="card">
+          <div class="icon">🚀</div>
+          <h3>استارتاب خودران</h3>
+          <p>نمونه‌سازی سریع الگوریتم‌های ادراک و کنترل قبل از تست روی خودرو واقعی.</p>
+        </div>
+        <div class="card">
+          <div class="icon">💰</div>
+          <h3>مدل درآمدی</h3>
+          <p>نسخه رایگان آموزشی، فروش لایسنس تجاری، خدمات پشتیبانی و کارگاه‌های آموزشی.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Budget -->
+  <section style="padding: 5rem 0 1rem;">
+    <div class="container">
+      <div class="section-header">
+        <span class="kicker">بودجه</span>
+        <h2>تجهیزات و منابع مورد نیاز</h2>
+        <p>کم‌هزینه‌ترین پیکربندی با استفاده از تجهیزات موجود دانشجو/دانشگاه.</p>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>جزئیات</th><th>تجهیزات</th><th>تخمین هزینه</th></tr></thead>
+          <tbody>
+            <tr><td>PC شبیه‌ساز</td><td>لپ‌تاپ/رایانه معمولی + مرورگر Chrome</td><td>موجود (۰ تومان)</td></tr>
+            <tr><td>گوشی کنترل‌کننده</td><td>اندروید/iOS با دوربین پشت</td><td>موجود (۰ تومان)</td></tr>
+            <tr><td>شبکه محلی</td><td>Wi-Fi + روتر معمولی</td><td>موجود (۰ تومان)</td></tr>
+            <tr><td>سرور و CDN</td><td>اجرای محلی Daphne / بدون CDN</td><td>بدون هزینه اضافی</td></tr>
+            <tr><td><strong>جمع کل</strong></td><td></td><td><strong>≈ ۰ تومان</strong></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta" id="download">
+    <h2>پروپوزال آماده برای ارسال</h2>
+    <p>این پروپوزال به صورت فایل HTML ریسپانسیو آماده است و قابل ویرایش و ارسال به دانشگاه یا شریک تجاری است.</p>
+    <a href="https://github.com/EmmettSS/SelfDriveSim" class="btn" target="_blank" rel="noopener">مشاهده کد و مخزن پروژه</a>
+  </section>
+
+  <!-- Footer -->
+  <footer id="contact">
+    <div class="container">
+      <div style="font-weight:700; color:#fff; margin-bottom:0.5rem; font-size:1.1rem;">SelfDriveSim — گروه نرم‌افزار EmmettSS</div>
+      <p style="margin-bottom:1rem;">پروپوزال پروژه دانشجویی · نسخه ۱٫۰ · آذر ۱۴۰۴ / نوامبر ۲۰۲۶</p>
+      <div>
+        <a href="https://github.com/EmmettSS/SelfDriveSim" target="_blank" rel="noopener">مخزن GitHub</a> ·
+        <a href="#">تماس با ما</a> ·
+        <a href="#">ایمیل تماس</a>
+      </div>
+      <p style="margin-top:1.5rem; font-size:0.8rem; color:#64748b;">
+        کپی‌رایت © ۲۰۲۶ EmmettSS. این پروژه open-source نیست؛ استفاده مجدد از کد نیازمند اجازهٔ کتبی نویسنده است.
+      </p>
+    </div>
+  </footer>
+
+</body>
+</html>
