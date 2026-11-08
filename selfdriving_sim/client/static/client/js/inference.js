@@ -1672,14 +1672,14 @@ export class DashboardController {
     // Stream cropped camera feed from the mobile phone to the simulator via WebSocket (live browser only)
     if (typeof HTMLVideoElement !== "undefined" && this.video instanceof HTMLVideoElement) {
       const now = this.now();
-      if (!this.lastFrameStreamTime || now - this.lastFrameStreamTime >= 300) {
+      if (!this.lastFrameStreamTime || now - this.lastFrameStreamTime >= 120) {
         // ONLY send preview frame if the control socket has ZERO buffered data
         // This ensures camera frames never compete with, delay, or backpressure driving controls
         if (this.wsControl?.readyState === 1 && (this.wsControl.bufferedAmount || 0) === 0) {
           this.lastFrameStreamTime = now;
           try {
             if (typeof this.canvas?.toDataURL === "function") {
-              const dataUrl = this.canvas.toDataURL("image/jpeg", 0.35);
+              const dataUrl = this.canvas.toDataURL("image/jpeg", 0.45);
               this.wsControl.send(JSON.stringify({ type: "camera_frame", image: dataUrl }));
             }
           } catch {}

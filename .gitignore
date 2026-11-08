@@ -28,3 +28,4 @@ staticfiles/
 # Temp test screenshots and traces
 test_*.png
 *.tmp
+simulation_logs/
