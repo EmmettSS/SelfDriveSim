@@ -797,8 +797,8 @@ npm run test:browser               # Chromium با دوربین مصنوعی + �
 
 | مجموعهٔ تست | نتیجه | توضیح |
 |---|---|---|
-| `pytest simulation client` | **۴۸ پاس، ۲ skip** | skip فقط تست‌های Redis که سرویس در دسترس نبود |
-| `npm test` (Node) | **۹۴ پاس، ۰ خطا** | صحنه (فیزیک، دیوار، چشمک‌زن، برخورد، دوربین)، استنتاج، GRU سفارشی، قرارداد مدل |
+| `pytest simulation client` | **۷۷ پاس، ۲ skip** | skip فقط تست‌های Redis که سرویس در دسترس نبود |
+| `npm test` (Node) | **۱۶۷ پاس، ۰ خطا** | صحنه (فیزیک، دیوار، چشمک‌زن، برخورد، دوربین، ADAS، تشخیص موانع بینایی، پنجره شناور)، استنتاج، GRU سفارشی، قرارداد مدل |
 | `pytest models` | با محیط ML | pinهای checkpoint، بازسازی گراف، چهار head، تبدیل و parity |
 | دود WebSocket روی سرور زنده | همه پاس | فرمان، تلومتری، هر دو hazard، رد hazard ناموجاز، رد فرمان خراب |
 | دود HTTP و استاتیک‌ها | همه `200` | `/`، `/dashboard/`، `scene.js`، `three.module.min.js`، `inference.js`، `model.json`، CSS |

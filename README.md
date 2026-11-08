@@ -1,6 +1,6 @@
 # SelfDriveSim 🚗🤖
 
-[![Tests](https://img.shields.io/badge/tests-144%20node%20%7C%2077%20pytest%20passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-167%20node%20%7C%2077%20pytest%20passing-brightgreen.svg)]()
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)]()
 [![Django](https://img.shields.io/badge/django-channels%20%2B%20daphne-darkgreen.svg)]()
 [![TensorFlow.js](https://img.shields.io/badge/tfjs-DAVE--2--GRU%20%2B%20COCO--SSD-orange.svg)]()
@@ -62,24 +62,32 @@
 1. **In-Browser DAVE-2-GRU Neural Autopilot**:
    - 3-frame temporal convolutional-recurrent network operating entirely client-side via TensorFlow.js.
    - Converted model shards loaded smoothly via `.dat` static files to bypass restrictive MIME web-server filters.
-2. **COCO-SSD Local Monitor Auto-Lock & 6-Point Calibration**:
+2. **Multi-Sensor ADAS Perception & Safety Corridor System**:
+   - Advanced driver assistance system with 4 selectable obstacle perception modes:
+     - **AI Vision (`ai_vision`)**: Deep learning object detection with COCO-SSD running client-side, estimating distance ($m$) and identifying open lanes.
+     - **Pure Computer Vision (`vision`)**: Adaptive real-time pixel heuristics analyzing road luminance, chroma, and contours, with strict false-positive rejection for road asphalt, divider dashes, road edges, LCD noise, and vehicle hood indicators.
+     - **LiDAR Simulation (`lidar`)**: Virtual bumper multi-ray rangefinder scanning up to 60 meters with real-time laser beam visualizer.
+     - **Ground-Truth Radar (`ground_truth`)**: Exact 3D scene entity coordinates for benchmarking and zero-latency telemetry.
+   - **Progressive Evasion & Early Signaling**: Proactive turn signals engage at 58 meters before steering intervention begins at 35 meters danger clearance, while preserving cruising throttle ($\ge 0.45$).
+3. **Pop-Out Drive Settings & Detachable HUD Window**:
+   - The Drive Settings panel and ADAS perception canvas can be detached into an independent floating pop-out window (Picture-in-Picture) with synchronized cross-window rendering, ensuring no duplicate canvas previews and keeping the main 3D driving viewport clear.
+4. **Robust Mobile Dashboard Perception (False Detection Elimination)**:
+   - Eliminates false obstacle detections and unexpected braking in Dashboard mode when the mobile rear camera watches the monitor. Computer vision heuristics are isolated to the simulator canvas, COCO-SSD confidence threshold is tuned to 0.35, and asphalt luminance/divider line exclusions prevent false alarms.
+5. **COCO-SSD Local Monitor Auto-Lock & 6-Point Calibration**:
    - Zero-cloud, local quantized COCO-SSD object detection running in the mobile browser to automatically locate and lock onto TV/laptop monitor borders.
    - **6-Point Interactive Touch & Mouse Calibration**: Interactive drag handles allowing users to freely adjust monitor crop boundaries with clamping and reset capabilities.
-3. **Lens Occlusion & Finger Block Safety Guard**:
+6. **Lens Occlusion & Finger Block Safety Guard**:
    - Built-in visual variance and luminance monitor that detects when the phone lens is blocked or obscured, immediately disengaging autopilot to prevent erratic steering or runaway sway.
-4. **Pure Computer Vision Obstacle Detection & Evasion**:
-   - Lightweight, real-time computer vision engine directly in the simulator processing incoming video frames.
-   - Geometric and chromatic filters rejecting false positives from asphalt shadows, lane divider stripes, and LCD subpixel chromatic aberrations.
-   - **Continuous Throttle Lane Evasion**: When avoiding obstacles or changing lanes, ego vehicle maintains cruising throttle ($\ge 0.45$) to avoid stalling in the middle of highway traffic.
-5. **Initial 10 km/h Smooth Start & 10s Spawn Protection**:
+7. **Dynamic Weather & Lighting Engine**:
+   - Realistic visual conditions including clear day, night headlights illumination gradient, and rainy wet-road sheens.
+8. **Initial 10 km/h Smooth Start & 10s Spawn Protection**:
    - Ego vehicle launches smoothly at an initial cruising speed of 10 km/h.
    - Traffic generation algorithm keeps the player's initial lane clear for 10 seconds to allow seamless autopilot engagement.
-6. **Expandable HUD & Autopilot Settings View**:
-   - Redesigned visual test panel with dynamic aspect ratio and sizing modes: **1x** (Standard), **1.5x** (Large), and **Cinema ⤢** (Expanded 640px widescreen).
-   - Side panel is freely resizable horizontally with live visual overlays showing detected obstacles and bounding boxes.
-7. **One-Click Launch Scripts & Zero-Config HTTPS**:
-   - `start.bat` for automatic virtual environment detection, IP resolution, and Daphne server startup.
-   - `python manage.py runsecure` command providing automatic self-signed TLS certificates for local HTTPS, allowing mobile camera access on Chrome and Safari without manual flag configuration.
+9. **Expandable HUD & Sizing Modes**:
+   - Visual perception panel with dynamic sizing modes: **1x** (Standard), **1.5x** (Large), and **Cinema ⤢** (Expanded 640px widescreen), horizontally resizable.
+10. **One-Click Launch Scripts & Zero-Config HTTPS**:
+    - `start.bat` for automatic virtual environment detection, IP resolution, and Daphne server startup.
+    - `python manage.py runsecure` command providing automatic self-signed TLS certificates for local HTTPS, allowing mobile camera access on Chrome and Safari without manual flag configuration.
 
 ---
 
@@ -138,7 +146,7 @@ python manage.py runsecure 0.0.0.0:8000
   ```bash
   cd selfdriving_sim
   npm test
-  # 144 / 144 unit tests passing
+  # 167 / 167 unit tests passing
   ```
 - **Python Backend & Django Channels Tests**:
   ```bash
@@ -172,24 +180,32 @@ python manage.py runsecure 0.0.0.0:8000
 1. **رانندگی خودکار با شبکه عصبی DAVE-2-GRU در مرورگر**:
    - پردازش توالی ۳ فریم اخیر به کمک شبکه کانولوشنی-تکرارشونده DAVE-2-GRU به صورت کاملاً کلاینت-ساید با TensorFlow.js.
    - تبدیل و بازخوانی ایمن وزن‌های مدل با پسوند `.dat` برای جلوگیری از خطاهای اعتبارسنجی MIME Type در سرورهای وب.
-2. **تشخیص و قفل خودکار مانیتور با COCO-SSD و کالیبراسیون دستی ۶ نقطه‌ای**:
+2. **سیستم ادراک چندحسی ADAS و کریدور ایمنی با ۴ حالت سنجش موانع**:
+   - سیستم پیشرفته دستیار راننده با پشتیبانی از ۴ سنسور تشخیصی قابل انتخاب:
+     - **هوش مصنوعی COCO-SSD (`ai_vision`)**: تشخیص عمیق خودروهای ترافیک در مرورگر، تخمین متری فاصله و تفکیک لاین‌های آزاد جهت سبقت.
+     - **بینایی ماشین خالص (`vision` / Pure CV)**: الگوریتم سبک پردازش تصویر با فیلتر هوشمند آسفالت، خطوط بریده و زرد اتوبان، لبه‌های جاده، نویز ساب‌پیکسل و چراغ‌های کاپوت جهت حذف قطعی هشدارهای کاذب.
+     - **شبیه‌ساز لیدار (`lidar`)**: اسکن پرتویی مجازی از سپر جلو تا فاصله ۶۰ متری با رندر خطوط لیزر روی جاده و اجسام.
+     - **رادار شبیه‌ساز (`ground_truth`)**: داده‌های موقعیتی دقیق و بی‌درنگ ۳ بعدی شبیه‌ساز برای ارزیابی، اشکال‌زدایی و بنچمارک.
+   - **راهنمای پیش‌دستانه و تغییر لاین ایمن**: فعال‌سازی راهنما در ۵۸ متری قبل از مانور فرمان در ۳۵ متری همراه با حفظ گاز ($\ge 0.45$) در طول تغییر لاین.
+3. **پنجره شناور و مستقل تنظیمات رانندگی (Pop-out Window)**:
+   - امکان جدا کردن پنل تنظیمات رانندگی و بوم پیش‌نمایش درک محیطی ADAS در یک پنجره شناور مستقل با همگام‌سازی دوطرفه، بدون تکرار تصویر و جلوگیری از شلوغی کادر اصلی شبیه‌ساز.
+4. **تثبیت هوشمند ادراک در حالت داشبورد گوشی (حذف تشخیص‌های اشتباه)**:
+   - تفکیک و ایزوله‌سازی فید دوربین زنده گوشی از فیلترهای پیکسلی شبیه‌ساز، تنظیم آستانه اطمینان مدل به ۰٫۳۵، و حذف کامل ترمزگیری‌های ناخواسته ناشی از تشخیص آسفالت، خطوط جاده و هوای مانیتور.
+5. **تشخیص و قفل خودکار مانیتور با COCO-SSD و کالیبراسیون دستی ۶ نقطه‌ای**:
    - پیاده‌سازی مدل سبک و آفلاین COCO-SSD جهت شناسایی کادر مانیتور در فریم دوربین گوشی.
    - **کالیبراسیون دستی ۶ نقطه‌ای**: امکان تنظیم دقیق محدوده کراپ مانیتور با درگ ۶ دستگیره لمسی (۴ گوشه + ۲ نقطه میانی) روی موبایل و ماوس رایانه با امکان ریست به حالت خودکار.
-3. **سیستم ایمنی تشخیص انسداد لنز (Lens Occlusion Guard)**:
+6. **سیستم ایمنی تشخیص انسداد لنز (Lens Occlusion Guard)**:
    - پایش هوشمند تاری و پوشش لنز (نظیر قرار گرفتن انگشت جلوی لنز یا تاریکی شدید) و متوقف‌سازی ایمن فرمان‌ها جهت جلوگیری از انحراف و چرخش ناگهانی خودرو.
-4. **سیستم بینایی ماشین خالص (Pure CV) برای شناسایی موانع و سبقت هوشمند**:
-   - الگوریتم سبک پردازش تصویر در شبیه‌ساز جهت استخراج خودروها و موانع از فریم‌های ورودی دوربین.
-   - فیلترهای هندسی و ابعادی برای حذف آلارم‌های کاذب ناشی از خطوط بریده جاده، سایه پل‌ها و انکسار رنگی ساب‌پیکسل‌های LCD.
-   - **حفظ گاز در تغییر خط و مانور فرار**: حفظ فشار گاز ($\ge 0.45$) در طول تغییر خط برای جلوگیری از توقف کامل خودرو در وسط اتوبان.
-5. **استارت نرم ۱۰ کیلومتر بر ساعت و منطقه امن ۱۰ ثانیه‌ای**:
+7. **موتور آب‌وهوا و نورپردازی پویا**:
+   - شبیه‌سازی شرایط روز، رانندگی در شب با گرادیان نور چراغ جلو و بازتاب آسفالت خیس بارانی.
+8. **استارت نرم ۱۰ کیلومتر بر ساعت و منطقه امن ۱۰ ثانیه‌ای**:
    - شروع رانندگی با سرعت پایدار اولیه ۱۰ کیلومتر بر ساعت.
    - محافظت از لاین شروع به مدت ۱۰ ثانیه به گونه‌ای که هیچ خودرویی مستقیماً مقابل خودروی کاربر اسپاون نشود.
-6. **پنل تنظیمات و دیدگاه دوربین گسترش‌پذیر (Expandable HUD)**:
-   - بازطراحی بخش نمایش زنده دوربین در تنظیمات خلبان خودکار با حالت‌های اندازه: **1x** (استاندارد)، **1.5x** (بزرگ) و **سینمایی ⤢** (نمای گسترده ۶۴۰ پیکسلی).
-   - قابلیت تغییر عرض پنل کناری به صورت درگ افقی و نمایش کادرهای تشخیصی موانع.
-7. **اسکریپت اجرای سریع و گواهی امن HTTPS خودکار**:
-   - اسکریپت `start.bat` برای راه‌اندازی با یک کلیک، تشخیص خودکار IP محلی و اجرای محیط مجازی.
-   - دستور مدیریتی `python manage.py runsecure` با تولید خودکار گواهینامه‌های امنیتی Self-Signed جهت دسترسی به دوربین بدون نیاز به تنظیم پرچم‌های پیچیده کروم.
+9. **پنل تنظیمات و دیدگاه دوربین گسترش‌پذیر (Expandable HUD)**:
+   - بازطراحی بخش نمایش زنده دوربین در تنظیمات خلبان خودکار با حالت‌های اندازه: **1x** (استاندارد)، **1.5x** (بزرگ) و **سینمایی ⤢** (نمای گسترده ۶۴۰ پیکسلی)، با قابلیت تغییر عرض پنل.
+10. **اسکریپت اجرای سریع و گواهی امن HTTPS خودکار**:
+    - اسکریپت `start.bat` برای راه‌اندازی با یک کلیک، تشخیص خودکار IP محلی و اجرای محیط مجازی.
+    - دستور مدیریتی `python manage.py runsecure` با تولید خودکار گواهینامه‌های امنیتی Self-Signed جهت دسترسی به دوربین بدون نیاز به تنظیم پرچم‌های پیچیده کروم.
 
 ---
 
@@ -244,7 +260,7 @@ python manage.py runsecure 0.0.0.0:8000
   ```bash
   cd selfdriving_sim
   npm test
-  # ۱۴۴ تست با موفقیت پاس شدند (144 passed)
+  # ۱۶۷ تست با موفقیت پاس شدند (167 passed)
   ```
 - **تست‌های پایتون و بک‌اند (Pytest)**:
   ```bash
