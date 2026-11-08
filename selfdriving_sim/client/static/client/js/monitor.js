@@ -262,11 +262,11 @@ export function detectScreenRect(brightness, {
       const area = (normX1 - normX0) * (normY1 - normY0);
 
       if (area < minArea || area > maxArea) continue;
-      // Reject flat horizontal light strips at the bottom of frame (keyboard RGB/desk LEDs)
-      if (normY0 >= 0.65 && aspect > 2.8) continue;
-
       // Fitness scoring based on area, solidity, and aspect ratio
       const aspect = (w / columns) / (h / rows);
+
+      // Reject flat horizontal light strips at the bottom of frame (keyboard RGB/desk LEDs)
+      if (normY0 >= 0.65 && aspect > 2.8) continue;
       const solidity = pixelCount / (w * h);
       const aspectScore = (aspect >= 0.8 && aspect <= 2.8) ? 1.2 : 0.6;
       const score = area * solidity * aspectScore;

@@ -164,7 +164,7 @@ class ControlConsumer(AsyncJsonWebsocketConsumer):
     async def receive_json(self, content, **kwargs):
         if isinstance(content, dict) and content.get("type") == "camera_frame":
             image = content.get("image")
-            if isinstance(image, str) and (image.startswith("data:image/") or len(image) < 150000):
+            if isinstance(image, str) and image.startswith("data:image/") and len(image) < 150000:
                 await self.channel_layer.group_send(
                     RENDER_GROUP,
                     {"type": "camera.frame", "image": image},

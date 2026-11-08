@@ -966,6 +966,10 @@
       <span class="hud-label">FPS</span>
       <span id="fps-value" class="hud-value">–</span>
     </div>
+    <div class="hud-item" id="hud-perception-item" style="cursor: pointer;" title="سنسور و وضعیت موانع (کلیک برای نمایش/بستن تصویر سنسور)">
+      <span class="hud-label">سنسور</span>
+      <span id="hud-perception-badge" class="hud-value" style="color: #38bdf8; font-size: 11px;">👁️ مسیر امن</span>
+    </div>
     <div class="hud-item hud-item--button">
       <button type="button" id="btn-restart-sim" class="hud-action-btn" title="شروع مجدد شبیه‌سازی">شروع مجدد ↻</button>
     </div>
@@ -1014,8 +1018,10 @@
         <div class="test-control-row" style="display: flex; align-items: center; justify-content: space-between; font-size: 11px; margin-top: -2px; margin-bottom: 4px;">
           <label for="sel-adas-source" style="color: #9aa7b4;">منبع تشخیص موانع:</label>
           <select id="sel-adas-source" style="background: #1e293b; color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 4px; padding: 2px 6px; font-size: 11px; cursor: pointer;">
-            <option value="vision" selected>👁️ بینایی تصویر خالص (Pure Vision)</option>
-            <option value="ground_truth">📡 رادار شبیه‌ساز (Sim Memory)</option>
+            <option value="ai_vision" selected>👁️ هوش مصنوعی تصویر (AI Vision - وابسته به تصویر دوربین)</option>
+            <option value="vision">👁️ بینایی ماشین نوری (Pure Vision - وابسته به تصویر دوربین)</option>
+            <option value="lidar">📡 لیدار سه‌بعدی سپر (3D Bumper LiDAR - حسگر مجازی سه‌بعدی شبیه‌ساز)</option>
+            <option value="ground_truth">🌐 حافظه داخلی شبیه‌ساز (Sim Memory - بدون سنسور)</option>
             <option value="off">⛔ غیرفعال (Off)</option>
           </select>
         </div>
@@ -1050,12 +1056,24 @@
           </select>
         </div>
 
-        <div class="test-control-row" style="display: flex; align-items: center; justify-content: space-between; font-size: 11px; margin-bottom: 10px;">
+        <div class="test-control-row" style="display: flex; align-items: center; justify-content: space-between; font-size: 11px; margin-bottom: 6px;">
           <label for="sel-traffic-density" style="color: #9aa7b4;">تراکم ترافیک:</label>
           <select id="sel-traffic-density" style="background: #161b22; color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); border-radius: 6px; padding: 2px 6px; font-size: 11px; cursor: pointer; font-family: inherit; font-weight: 600;">
             <option value="dense" selected>ترافیک سنگین و مداوم 🚗🚗🚗</option>
             <option value="medium">ترافیک متوسط 🚗🚗</option>
             <option value="sparse">ترافیک خلوت اولیه 🚗</option>
+          </select>
+        </div>
+
+        <div class="test-control-row" style="display: flex; align-items: center; justify-content: space-between; font-size: 11px; margin-bottom: 10px;">
+          <label for="sel-weather" style="color: #9aa7b4;">شرایط جوی و آب‌وهوا:</label>
+          <select id="sel-weather" style="background: #161b22; color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); border-radius: 6px; padding: 2px 6px; font-size: 11px; cursor: pointer; font-family: inherit; font-weight: 600;">
+            <option value="clear" selected>☀️ آفتابی و شفاف (Clear Day)</option>
+            <option value="sunset">🌅 غروب طلایی (Sunset)</option>
+            <option value="rain">🌧️ بارانی و خیس (Rain & Wet)</option>
+            <option value="overcast">☁️ ابری (Overcast)</option>
+            <option value="foggy">🌫️ مه غلیظ (Dense Fog)</option>
+            <option value="night">🌙 شب مهتابی (Night Driving)</option>
           </select>
         </div>
 
@@ -1100,7 +1118,7 @@
 
           <!-- Visual Obstacle Detection & Camera Preview (Bigger & Expandable) -->
           <div id="autopilot-preview-container" class="test-panel-preview size-normal">
-            <canvas id="autopilot-canvas" width="160" height="120"></canvas>
+            <canvas id="autopilot-canvas" width="320" height="240"></canvas>
             <div class="preview-overlay">
               <span id="autopilot-fps" class="preview-tag">0 FPS</span>
               <span id="autopilot-mode-tag" class="preview-tag" style="background: rgba(56, 189, 248, 0.35);">VISION DETECT</span>
@@ -1109,6 +1127,12 @@
                 <span id="expand-text">بزرگ</span>
               </button>
             </div>
+          </div>
+
+          <!-- Live Perception HUD Telemetry Feed -->
+          <div id="autopilot-detection-feed" style="margin-top: 5px; margin-bottom: 7px; font-family: Consolas, monospace; font-size: 10px; color: #94a3b8; background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 6px; padding: 4px 8px; display: flex; justify-content: space-between; align-items: center;">
+            <span id="autopilot-detect-count" style="color: #38bdf8; font-weight: 600;">👁️ اشیاء دیداری: ۰</span>
+            <span id="autopilot-nearest-dist" style="color: #22c55e;">مسیر پیش‌رو باز و امن</span>
           </div>
 
           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
@@ -1122,6 +1146,9 @@
             </button>
             <button type="button" id="btn-source-sim" class="source-toggle-btn" title="هدایت با مدل خودران شبیه‌ساز مستقیم روی تصویر جاده">
               <span>🎮 مدل شبیه‌ساز (Sim)</span>
+            </button>
+            <button type="button" id="btn-source-keyboard" class="source-toggle-btn" title="رانندگی دستی با کیبورد (↑/W گاز، ←/→ فرمان)">
+              <span>⌨️ کیبورد دستی</span>
             </button>
           </div>
 
@@ -1166,8 +1193,8 @@
   </div>
 
   <div id="hud-legend">
-    <kbd>↑</kbd>/<kbd>W</kbd> گاز &nbsp;·&nbsp; <kbd>↓</kbd>/<kbd>S</kbd> ترمز &nbsp;·&nbsp; <kbd>←</kbd>/<kbd>→</kbd>/<kbd>A</kbd>/<kbd>D</kbd> فرمان
-    <span aria-hidden="true">·</span> بدون فرمان گوشی، کیبورد می‌راند
+    <kbd>↑</kbd>/<kbd>W</kbd> گاز &nbsp;·&nbsp; <kbd>↓</kbd>/<kbd>S</kbd> ترمز &nbsp;·&nbsp; <kbd>←</kbd>/<kbd>→</kbd>/<kbd>A</kbd>/<kbd>D</kbd> فرمان &nbsp;·&nbsp; <kbd>U</kbd> آب‌وهوا
+    <span aria-hidden="true">·</span> برای رانندگی با کیبورد، حالت «⌨️ کیبورد دستی» را در پنل انتخاب کنید
     <button type="button" id="btn-restart-sim-legend" class="hud-button" title="شروع مجدد شبیه‌سازی">شروع مجدد ↻</button>
     <button type="button" id="screen-lock" class="hud-button" aria-pressed="false" title="قفل تصویر روی تمام صفحه (خروج: Esc)">تمام‌صفحه</button>
     <button type="button" id="qr-toggle" class="hud-button" aria-controls="qr-panel" aria-expanded="false">داشبورد گوشی (QR)</button>
@@ -1236,17 +1263,8 @@
         screenLock.hidden = true; // API unavailable: keyboard F11 remains
       }
 
-      // Restart buttons: call simulation.restart() or fallback to page reload
-      function triggerRestart() {
-        if (typeof window.restartSimulation === "function") {
-          window.restartSimulation();
-        } else {
-          window.location.reload();
-        }
-      }
-      for (const id of ["btn-restart-sim", "btn-restart-sim-legend"]) {
-        document.getElementById(id)?.addEventListener("click", triggerRestart);
-      }
+      // NB: restart buttons are bound inside scene.js boot(); binding them
+      // here as well made every click fire restart() twice.
     })();
   </script>
 
