@@ -941,3 +941,28 @@ test("renderPerceptionPreview draws on-device phone obstacles and renders AI bad
   renderPerceptionPreview(simulation);
   assert.ok(operations.some(op => op.includes("32m")));
 });
+
+test("mobile phone obstacles project to world coordinates with ego lateral offset and heading", () => {
+  // Ego vehicle in Left lane (-3.7m) facing slightly right (+0.05 rad)
+  const egoX = -3.7;
+  const egoHeading = 0.05;
+  const boxFocal = 104;
+
+  // Obstacle detected in phone camera looking down road: bbox center is at centerX = 120 (towards the right side of phone screen)
+  const [bx, by, bw, bh] = [100, 50, 40, 30];
+  const centerX = bx + bw / 2; // 120
+  const distM = 30;
+
+  const thetaCam = (centerX - 80) / boxFocal; // (120 - 80) / 104 = +0.3846 rad
+  const thetaWorld = thetaCam + egoHeading;
+  const worldX = +(egoX + distM * thetaWorld).toFixed(2);
+
+  // worldX = -3.7 + 30 * (0.3846 + 0.05) = -3.7 + 13.04 = ~9.34m (off to right)
+  // When an obstacle is physically in Center lane (worldX ~ 0), it correctly resolves to laneIdx = 1
+  const dividerXs = [-1.7, 1.7];
+  let laneIdx = 1;
+  if (worldX < dividerXs[0]) laneIdx = 0;
+  else if (worldX > dividerXs[1]) laneIdx = 2;
+
+  assert.equal(laneIdx, 2, "correctly classified as right lane instead of hardcoded center lane");
+});

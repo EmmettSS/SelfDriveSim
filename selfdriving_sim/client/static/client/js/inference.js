@@ -1708,7 +1708,7 @@ export class DashboardController {
             if (typeof streamTarget?.toDataURL === "function") {
               const dataUrl = streamTarget.toDataURL("image/jpeg", 0.60);
               const payload = { type: "camera_frame", image: dataUrl };
-              if (Array.isArray(this.latestMobileObstacles) && this.latestMobileObstacles.length > 0) {
+              if (Array.isArray(this.latestMobileObstacles)) {
                 payload.obstacles = this.latestMobileObstacles;
               }
               this.wsControl.send(JSON.stringify(payload));
@@ -1828,29 +1828,18 @@ export class DashboardController {
 
   /** Sends one command and updates the HUD. A failed send stops the loop. */
   dispatchCommand(output, now) {
-    let finalOutput = output;
     if (Array.isArray(this.latestMobileObstacles) && this.latestMobileObstacles.length > 0) {
-      const nearestAhead = this.latestMobileObstacles.find((o) => o.distanceM < 42 && o.laneIdx === 1);
-      if (nearestAhead) {
-        finalOutput = { ...output };
-        finalOutput.throttle = Math.min(finalOutput.throttle, 0.35);
-        if (nearestAhead.distanceM < 16) {
-          finalOutput.brake = Math.max(finalOutput.brake, 0.75);
-          finalOutput.throttle = 0;
-        }
-        if (Math.abs(finalOutput.steering) < 0.25) {
-          finalOutput.steering = -0.45; // Evade to left lane
-          finalOutput.turn_signal = 1;
-        }
-        this.setStatus(`⚠️ هوش مصنوعی گوشی: مانع در ${nearestAhead.distanceM} متری (مسیر روبرو) — مانور فرار`);
+      const nearest = this.latestMobileObstacles.slice().sort((a, b) => a.distanceM - b.distanceM)[0];
+      if (nearest && nearest.distanceM < 60) {
+        this.setStatus(`⚠️ هوش مصنوعی گوشی: مانع در ${nearest.distanceM} متری (${nearest.laneName || "روبرو"})`);
       }
     }
-    if (!this.sendCommand(finalOutput)) {
+    if (!this.sendCommand(output)) {
       this.stopInferenceLoop("ارسال فرمان ناموفق بود؛ اتصال را بررسی کنید.", { sendStop: false });
       this.wsControl?.close(4000, "Control send failed");
       return false;
     }
-    this.updateIndicators(finalOutput);
+    this.updateIndicators(output);
     this.setText("fps-value", this.rate.sample(now, true));
     return true;
   }

@@ -3645,30 +3645,19 @@ function createSimulation(canvas, hooks) {
             let tacticalBrake = ctrl.brake;
 
             if (corridor.shouldAvoid) {
-              if (currClear < 14) {
+              if (currClear < 16) {
                 // Critical proximity: emergency maximum braking to avoid collision
                 tacticalThrottle = 0;
                 tacticalBrake = 0.95;
-              } else if (currClear < 28) {
-                // High danger: firm braking to allow swift lane evasion
-                tacticalThrottle = 0;
-                tacticalBrake = 0.70;
-              } else if (currClear < 45) {
-                // Approaching obstacle: lift off throttle and apply assertive deceleration
-                tacticalThrottle = 0;
-                tacticalBrake = 0.40;
-              } else if (currClear < 65) {
-                // Distant obstacle: early deceleration and speed reduction
-                tacticalThrottle = 0.05;
-                tacticalBrake = 0.20;
               } else {
-                // Far obstacle: cap speed smoothly with evasion steering
-                tacticalThrottle = Math.min(0.35, ctrl.throttle);
+                // Target escape lane is clear: maintain assertive cruising momentum
+                // so steering authority is 100% and vehicle swerves swiftly and cleanly
+                tacticalThrottle = Math.max(0.48, ctrl.throttle);
                 tacticalBrake = 0;
               }
             } else {
               // Aligning into clear target lane
-              tacticalThrottle = Math.max(0.40, ctrl.throttle);
+              tacticalThrottle = Math.max(0.45, ctrl.throttle);
               tacticalBrake = 0;
             }
 
@@ -3775,30 +3764,19 @@ function createSimulation(canvas, hooks) {
           let tacticalBrake = ctrl.brake;
 
           if (corridor.shouldAvoid) {
-            if (currClear < 14) {
+            if (currClear < 16) {
               // Critical proximity: emergency maximum braking to avoid collision
               tacticalThrottle = 0;
               tacticalBrake = 0.95;
-            } else if (currClear < 28) {
-              // High danger: firm braking to allow swift lane evasion
-              tacticalThrottle = 0;
-              tacticalBrake = 0.70;
-            } else if (currClear < 45) {
-              // Approaching obstacle: lift off throttle and apply assertive deceleration
-              tacticalThrottle = 0;
-              tacticalBrake = 0.40;
-            } else if (currClear < 65) {
-              // Distant obstacle: early deceleration and speed reduction
-              tacticalThrottle = 0.05;
-              tacticalBrake = 0.20;
             } else {
-              // Far obstacle: cap speed smoothly with evasion steering
-              tacticalThrottle = Math.min(0.35, ctrl.throttle);
+              // Target escape lane is clear: maintain assertive cruising momentum
+              // so steering authority is 100% and vehicle swerves swiftly and cleanly
+              tacticalThrottle = Math.max(0.48, ctrl.throttle);
               tacticalBrake = 0;
             }
           } else {
             // Aligning into clear target lane
-            tacticalThrottle = Math.max(0.40, ctrl.throttle);
+            tacticalThrottle = Math.max(0.45, ctrl.throttle);
             tacticalBrake = 0;
           }
 
@@ -4142,12 +4120,32 @@ function createSimulation(canvas, hooks) {
           // Option A: Deep Learning Neural Network (COCO-SSD)
           const hasPhoneObstacles = (settings.drivingMode === "camera"
             && Array.isArray(simulation?.latestPhoneObstacles)
-            && simulation.latestPhoneObstacles.length > 0
             && (performance.now() - (simulation.lastPhoneObstacleTime || 0) < 1800));
 
           if (hasPhoneObstacles) {
-            // Immediate zero-latency on-device phone detections!
-            latestVisualObstacles = trackAndSmoothObstacles(simulation.latestPhoneObstacles);
+            // Immediate zero-latency on-device phone detections projected to world coordinates
+            const boxFocal = _perceptionFocalCrop || 104;
+            const calibratedPhoneObs = simulation.latestPhoneObstacles.map((obs) => {
+              if (Array.isArray(obs.bbox) && obs.bbox.length >= 4) {
+                const [bx, by, bw, bh] = obs.bbox;
+                const centerX = bx + bw / 2;
+                const thetaCam = (centerX - 80) / boxFocal;
+                const thetaWorld = thetaCam + state.heading;
+                const distM = obs.distanceM;
+                const worldX = +(state.x + distM * thetaWorld).toFixed(2);
+                let laneIdx = 1;
+                if (worldX < _perceptionDividerXs[0]) laneIdx = 0;
+                else if (worldX > _perceptionDividerXs[1]) laneIdx = 2;
+                return {
+                  ...obs,
+                  worldX,
+                  laneIdx,
+                  laneName: ["چپ", "وسط", "راست"][laneIdx],
+                };
+              }
+              return obs;
+            });
+            latestVisualObstacles = trackAndSmoothObstacles(calibratedPhoneObs);
             if (simulation) simulation.latestVisualObstacles = latestVisualObstacles;
             renderPerceptionPreview(simulation);
           } else if (!isAiDetecting) {
@@ -4499,7 +4497,7 @@ function connectRenderSocket(hud) {
         }
         simulation.phoneCameraImage.src = message.image;
         simulation.lastPhoneCameraTime = performance.now();
-        if (Array.isArray(message.obstacles) && message.obstacles.length > 0) {
+        if (Array.isArray(message.obstacles)) {
           simulation.latestPhoneObstacles = message.obstacles;
           simulation.lastPhoneObstacleTime = performance.now();
         }

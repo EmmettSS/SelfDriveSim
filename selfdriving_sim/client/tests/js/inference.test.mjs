@@ -595,19 +595,20 @@ test("scanMobileObstacles detects vehicles on-device and calculates distance and
   assert.ok(obs.distanceM > 0 && obs.distanceM < 95);
 });
 
-test("dispatchCommand proactively alters steering and throttle when on-device obstacle is ahead", async () => {
+test("dispatchCommand updates HUD alert when on-device obstacle is detected and preserves model steering for corridor planner", async () => {
   const h = await connected();
   h.controller.running = true;
   h.controller.latestMobileObstacles = [
-    { distanceM: 25, laneIdx: 1, class: "car", score: 0.9 }
+    { distanceM: 25, laneIdx: 1, class: "car", score: 0.9, laneName: "وسط" }
   ];
 
   const neutralCmd = { steering: 0, throttle: 0.5, brake: 0, turn_signal: 0 };
   assert.equal(h.controller.dispatchCommand(neutralCmd, Date.now()), true);
 
   const sent = h.sockets[0].sent.at(-1);
-  assert.ok(sent.steering < 0, "proactively steered left to evade");
-  assert.equal(sent.turn_signal, 1, "turn signal activated");
-  assert.ok(sent.throttle <= 0.35, "throttle reduced for safety");
+  assert.equal(sent.steering, 0, "preserves steering for simulator ADAS corridor planner");
+  assert.equal(sent.throttle, 0.5);
+  assert.equal(sent.brake, 0);
+  assert.match(h.ui["status-message"].textContent, /25/, "status updated with obstacle distance");
 });
 
