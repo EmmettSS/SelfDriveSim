@@ -12,6 +12,7 @@ import {
   detectObstaclesWithAI,
   detectObstaclesWithLidar,
   drawVisualDetectionOverlays,
+  renderPerceptionPreview,
 } from "../../static/simulation/js/scene.js";
 
 test("evaluateCorridorManeuver keeps current lane when all clearances are clear", () => {
@@ -767,4 +768,125 @@ test("detectVisualObstacles detects physical hand or large blockage across the r
   const centerBlockage = detections.find(d => d.laneIdx === 1);
   assert.ok(centerBlockage);
   assert.ok(centerBlockage.distanceM > 0 && centerBlockage.distanceM <= 35);
+});
+
+test("renderPerceptionPreview renders to simulation.autopilotCanvas and spans full 320x240 without 160x120 crop", () => {
+  const operations = [];
+  const mockCtx = {
+    save() { operations.push("save"); },
+    restore() { operations.push("restore"); },
+    strokeRect(x, y, w, h) { operations.push(`strokeRect:${x},${y},${w},${h}`); },
+    fillRect(x, y, w, h) { operations.push(`fillRect:${x},${y},${w},${h}`); },
+    fillText(text, x, y) { operations.push(`fillText:${text}`); },
+    beginPath() { operations.push("beginPath"); },
+    moveTo(x, y) { operations.push(`moveTo:${x},${y}`); },
+    lineTo(x, y) { operations.push(`lineTo:${x},${y}`); },
+    stroke() { operations.push("stroke"); },
+    arc() {},
+    measureText(text) { return { width: text.length * 6 }; },
+    drawImage(src, sx, sy, sw, sh, dx, dy, dw, dh) {
+      if (arguments.length === 5) {
+        operations.push(`drawImage:5args:dx=${sx},dy=${sy},dw=${sw},dh=${sh}`);
+      } else {
+        operations.push(`drawImage:9args:dx=${dx},dy=${dy},dw=${dw},dh=${dh}`);
+      }
+    },
+  };
+
+  const mockCanvas = {
+    width: 320,
+    height: 240,
+    getContext(type) {
+      if (type === "2d") return mockCtx;
+      return null;
+    },
+  };
+
+  const mockPanel = {
+    hidden: false,
+    classList: { contains: () => false },
+    querySelector: () => null,
+  };
+
+  const simulation = {
+    autopilotCanvas: mockCanvas,
+    testPanel: mockPanel,
+    renderer: {
+      domElement: { width: 1280, height: 720 },
+    },
+    latestVisualObstacles: [],
+    settings: { obstacleSource: "ai_vision", drivingMode: "sim" },
+    corridorState: { lockedTargetLane: 1 },
+  };
+
+  renderPerceptionPreview(simulation);
+
+  // Must draw full background spanning dw=320, dh=240, NOT 160x120
+  assert.ok(operations.some(op => op.includes("dw=320,dh=240")));
+  assert.ok(!operations.some(op => op.includes("dw=160,dh=120")));
+});
+
+test("renderPerceptionPreview renders to popped-out autopilotCanvas when panel has is-popped-out", () => {
+  const operations = [];
+  const mockCtx = {
+    save() { operations.push("save"); },
+    restore() { operations.push("restore"); },
+    strokeRect(x, y, w, h) { operations.push(`strokeRect:${x},${y},${w},${h}`); },
+    fillRect(x, y, w, h) { operations.push(`fillRect:${x},${y},${w},${h}`); },
+    fillText(text, x, y) { operations.push(`fillText:${text}`); },
+    beginPath() { operations.push("beginPath"); },
+    moveTo() {},
+    lineTo() {},
+    stroke() {},
+    arc() {},
+    measureText(text) { return { width: text.length * 6 }; },
+    drawImage(src, sx, sy, sw, sh, dx, dy, dw, dh) {
+      operations.push(`drawImage:dx=${dx},dy=${dy},dw=${dw},dh=${dh}`);
+    },
+  };
+
+  const mockCanvas = {
+    width: 320,
+    height: 240,
+    getContext(type) {
+      if (type === "2d") return mockCtx;
+      return null;
+    },
+  };
+
+  const mockPanel = {
+    hidden: true, // panel is "hidden" in main document, but is-popped-out is true
+    classList: { contains: (cls) => cls === "is-popped-out" },
+    querySelector: () => null,
+  };
+
+  const simulation = {
+    autopilotCanvas: mockCanvas,
+    testPanel: mockPanel,
+    renderer: {
+      domElement: { width: 1280, height: 720 },
+    },
+    latestVisualObstacles: [],
+    settings: { obstacleSource: "ai_vision", drivingMode: "sim" },
+    corridorState: { lockedTargetLane: 1 },
+  };
+
+  renderPerceptionPreview(simulation);
+
+  // Even though mockPanel.hidden is true, because is-popped-out is true, it renders full frame!
+  assert.ok(operations.some(op => op.includes("dw=320,dh=240")));
+});
+
+test("detectVisualObstacles safely returns empty array on HTMLImageElement (phone camera feed)", () => {
+  class FakeImage {}
+  globalThis.HTMLImageElement = FakeImage;
+
+  const fakeImg = new FakeImage();
+  const result = detectVisualObstacles(fakeImg, 0, 0);
+  assert.deepEqual(result, []);
+});
+
+test("detectObstaclesWithAI returns empty array when no vehicles detected without triggering CV fallback", async () => {
+  const result = await detectObstaclesWithAI({ mockPredictions: [] }, 0, 0);
+  assert.deepEqual(result, []);
 });

@@ -724,6 +724,12 @@ export function detectVisualObstacles(source, egoX = 0, egoHeading = 0, laneCent
   _perceptionSourceUsed = "cv";
   if (!source) return [];
 
+  if (typeof HTMLImageElement !== "undefined" && source instanceof HTMLImageElement) {
+    // Optical pixel heuristics strictly require the calibrated Three.js simulation canvas,
+    // not an external smartphone camera feed pointed at an LCD monitor.
+    return [];
+  }
+
   // Focal depends on the source kind: ImageData buffers are already 4:3
   // perception crops, stretched canvases/images span the full frame.
   const focalPx = focalForSource(source);
@@ -819,11 +825,12 @@ export function detectVisualObstacles(source, egoX = 0, egoHeading = 0, laneCent
       const minC = Math.min(r, g, b);
       const chroma = maxC - minC;
 
-      // 1. Lane divider markings (white dashes, yellow studs) at the preset divider positions
-      const isOnDivider = Math.abs(worldX - _perceptionDividerXs[0]) < 0.32
-        || Math.abs(worldX - _perceptionDividerXs[1]) < 0.32;
-      const isWhiteLine = (lum > Math.max(130, roadLum + 35)) && maxDiff <= 25 && isOnDivider;
-      const isYellowLine = r > 110 && g > 95 && b < 80 && (r - b) > 30 && isOnDivider;
+      // 1. Lane divider markings (white dashes, yellow studs) at the preset divider positions and road edges
+      const isOnDivider = Math.abs(worldX - _perceptionDividerXs[0]) < 0.45
+        || Math.abs(worldX - _perceptionDividerXs[1]) < 0.45;
+      const isRoadEdge = Math.abs(worldX) >= _perceptionRoadHalfWidth - 0.45;
+      const isWhiteLine = (lum > Math.max(120, roadLum + 25)) && maxDiff <= 24 && (isOnDivider || isRoadEdge);
+      const isYellowLine = r > 105 && g > 90 && b < 85 && (r - b) > 25 && (isOnDivider || isRoadEdge);
       if (isWhiteLine || isYellowLine) {
         continue;
       }
@@ -843,10 +850,11 @@ export function detectVisualObstacles(source, egoX = 0, egoHeading = 0, laneCent
       const isSaturatedBody = chroma >= Math.max(20, roadLum * 0.35) && lum >= Math.max(14, roadLum * 0.35);
 
       // 5. General Road Obstacle / Physical Vehicle / Hand Blockage:
-      // Any physical entity in the lane that significantly differs from the road asphalt baseline
+      // Any physical entity in the lane that significantly differs from the road asphalt baseline.
+      // Neutral painted pavement without color difference is NOT a vehicle obstacle.
       const lumDiff = Math.abs(lum - roadLum);
-      const isRoadObstacle = (lumDiff >= Math.max(28, roadLum * 0.40) || chroma >= 24) &&
-                            (maxDiff >= 16 || lum > 115 || lum < 15);
+      const isRoadObstacle = (chroma >= 26 || lumDiff >= Math.max(35, roadLum * 0.50)) &&
+                            (maxDiff >= 20 || (lum < 16 && roadLum >= 24));
 
       if (isHeadlight || isTaillight || isRedPaint || isYellowOrangePaint || isGreenPaint || isSaturatedBody || isRoadObstacle) {
         grid[y * 160 + x] = 1;
@@ -1046,6 +1054,8 @@ export function ensureCocoDetector() {
 export async function detectObstaclesWithAI(source, egoX = 0, egoHeading = 0, laneCentres = LANE_CENTRES) {
   if (!source) return [];
 
+  const isPhoneImage = (typeof HTMLImageElement !== "undefined" && source instanceof HTMLImageElement);
+
   // Check for mock predictions in test environments
   let preds = null;
   if (Array.isArray(source.mockPredictions)) {
@@ -1055,6 +1065,7 @@ export async function detectObstaclesWithAI(source, egoX = 0, egoHeading = 0, la
     if (!model) {
       model = await ensureCocoDetector();
       if (!model) {
+        if (isPhoneImage) return [];
         const fallback = detectVisualObstacles(source, egoX, egoHeading, laneCentres);
         _perceptionSourceUsed = "cv_fallback";
         return fallback;
@@ -1078,9 +1089,10 @@ export async function detectObstaclesWithAI(source, egoX = 0, egoHeading = 0, la
     }
 
     try {
-      preds = await model.detect(inputTarget, 10, 0.18);
+      preds = await model.detect(inputTarget, 10, 0.35);
     } catch (err) {
       console.warn("[Perception] AI inference exception:", err);
+      if (isPhoneImage) return [];
       const fallback = detectVisualObstacles(source, egoX, egoHeading, laneCentres);
       _perceptionSourceUsed = "cv_fallback";
       return fallback;
@@ -1088,11 +1100,6 @@ export async function detectObstaclesWithAI(source, egoX = 0, egoHeading = 0, la
   }
 
   if (!Array.isArray(preds) || preds.length === 0) {
-    if (!source.mockPredictions && typeof document !== "undefined") {
-      const fallback = detectVisualObstacles(source, egoX, egoHeading, laneCentres);
-      _perceptionSourceUsed = "cv_fallback";
-      return fallback;
-    }
     return [];
   }
 
@@ -1106,7 +1113,7 @@ export async function detectObstaclesWithAI(source, egoX = 0, egoHeading = 0, la
 
   for (const pred of preds) {
     const cls = (pred.class || "").toLowerCase();
-    if (!validClasses.has(cls) || (pred.score || 0) < 0.18) continue;
+    if (!validClasses.has(cls) || (pred.score || 0) < 0.35) continue;
 
     const [px, py, pw, ph] = pred.bbox;
     const bx = px * scaleX;
@@ -1149,11 +1156,12 @@ export async function detectObstaclesWithAI(source, egoX = 0, egoHeading = 0, la
   }
 
   _perceptionSourceUsed = rawBoxes.length > 0 ? "ai" : _perceptionSourceUsed;
-  if (rawBoxes.length === 0 && !source.mockPredictions && typeof document !== "undefined") {
-    const fallback = detectVisualObstacles(source, egoX, egoHeading, laneCentres);
-    _perceptionSourceUsed = "cv_fallback";
-    return fallback;
+  if (rawBoxes.length === 0) {
+    return [];
   }
+
+  rawBoxes.sort((a, b) => a.distanceM - b.distanceM);
+  return rawBoxes;
 
   rawBoxes.sort((a, b) => a.distanceM - b.distanceM);
   return rawBoxes;
@@ -1639,9 +1647,11 @@ export function drawVisualDetectionOverlays(ctx, obstacles, targetLaneIdx = 1, w
  */
 export function renderPerceptionPreview(simulation) {
   if (!simulation) return;
-  const previewCanvas = document.getElementById("autopilot-canvas");
-  const testPanel = document.getElementById("test-panel");
-  const hudBadge = document.getElementById("hud-perception-badge");
+  const testPanel = simulation.testPanel || (typeof document !== "undefined" ? document.getElementById("test-panel") : null);
+  const previewCanvas = simulation.autopilotCanvas
+    || (simulation.popoutWindow && !simulation.popoutWindow.closed ? simulation.popoutWindow.document.getElementById("autopilot-canvas") : null)
+    || (typeof document !== "undefined" ? document.getElementById("autopilot-canvas") : null);
+  const hudBadge = typeof document !== "undefined" ? document.getElementById("hud-perception-badge") : null;
 
   const obstacles = simulation.latestVisualObstacles || [];
   const obstacleSource = simulation.settings?.obstacleSource || "ai_vision";
@@ -1665,7 +1675,8 @@ export function renderPerceptionPreview(simulation) {
   }
 
   // 2. Only render preview canvas if element exists and panel is not hidden
-  if (!previewCanvas || (testPanel && testPanel.hidden)) return;
+  const isPoppedOut = testPanel?.classList?.contains("is-popped-out");
+  if (!previewCanvas || (testPanel && testPanel.hidden && !isPoppedOut)) return;
   const ctx = previewCanvas.getContext("2d");
   if (!ctx) return;
 
@@ -1702,9 +1713,9 @@ export function renderPerceptionPreview(simulation) {
   drawVisualDetectionOverlays(ctx, obstacles, targetLaneIdx, pw, ph, obstacleSource);
 
   // Update telemetry tags in the preview panel
-  const countBadge = document.getElementById("autopilot-detect-count");
-  const nearestBadge = document.getElementById("autopilot-nearest-dist");
-  const modeTag = document.getElementById("autopilot-mode-tag");
+  const countBadge = testPanel?.querySelector("#autopilot-detect-count") || (typeof document !== "undefined" ? document.getElementById("autopilot-detect-count") : null);
+  const nearestBadge = testPanel?.querySelector("#autopilot-nearest-dist") || (typeof document !== "undefined" ? document.getElementById("autopilot-nearest-dist") : null);
+  const modeTag = testPanel?.querySelector("#autopilot-mode-tag") || (typeof document !== "undefined" ? document.getElementById("autopilot-mode-tag") : null);
 
   if (countBadge) {
     const prefix = obstacleSource === "lidar" ? "📡 لیدار" : (obstacleSource === "ai_vision" ? "🤖 هوش مصنوعی" : (obstacleSource === "ground_truth" ? "🌐 دوقلوی مجازی" : "👁️ بینایی تصویر"));
@@ -4148,11 +4159,8 @@ function createSimulation(canvas, hooks) {
               });
           }
         } else if (settings.obstacleSource === "vision") {
-          // Option C: Optical heuristics
-          const visualSource = (settings.drivingMode === "camera" && simulation?.phoneCameraReady && simulation?.phoneCameraImage && (performance.now() - (simulation.lastPhoneCameraTime || 0) < 5000))
-            ? simulation.phoneCameraImage
-            : canvas;
-          const rawDetections = detectVisualObstacles(visualSource, state.x, state.heading, traffic?.laneCentres || LANE_CENTRES);
+          // Option C: Optical heuristics (requires clean 3D simulation canvas with calibrated pinhole horizon)
+          const rawDetections = detectVisualObstacles(canvas, state.x, state.heading, traffic?.laneCentres || LANE_CENTRES);
           latestVisualObstacles = trackAndSmoothObstacles(rawDetections);
           if (simulation) simulation.latestVisualObstacles = latestVisualObstacles;
           renderPerceptionPreview(simulation);
@@ -4603,7 +4611,7 @@ function makeElementDraggable(element, handle) {
  * Manages popping out a panel into an independent OS browser window (exportable)
  * for multi-monitor setups or clearing view for phone cameras, and restoring it seamlessly.
  */
-function setupPopout(element, popoutBtn) {
+function setupPopout(element, popoutBtn, simulation) {
   let popoutWindow = null;
   const parentNode = element.parentNode;
   const nextNode = element.nextSibling;
@@ -4621,6 +4629,11 @@ function setupPopout(element, popoutBtn) {
     if (popoutBtn) {
       popoutBtn.textContent = "⧉";
       popoutBtn.title = "باز کردن در پنجره مجزا (Pop-out to separate window)";
+    }
+    if (simulation) {
+      simulation.popoutWindow = null;
+      simulation.popoutDocument = null;
+      renderPerceptionPreview(simulation);
     }
     popoutWindow = null;
   }
@@ -4715,6 +4728,12 @@ function setupPopout(element, popoutBtn) {
       popoutBtn.title = "بازگرداندن پنل به صفحه اصلی شبیه‌ساز";
     }
 
+    if (simulation) {
+      simulation.popoutWindow = popoutWindow;
+      simulation.popoutDocument = doc;
+      renderPerceptionPreview(simulation);
+    }
+
     popoutWindow.addEventListener("beforeunload", restorePanel);
     popoutWindow.addEventListener("pagehide", restorePanel);
   }
@@ -4784,6 +4803,11 @@ async function initAutopilot(simulation, sceneCanvas) {
 
   if (!panel || !previewCanvas) return;
 
+  if (simulation) {
+    simulation.testPanel = panel;
+    simulation.autopilotCanvas = previewCanvas;
+  }
+
   // 1. Draggability
   if (header) {
     makeElementDraggable(panel, header);
@@ -4791,7 +4815,7 @@ async function initAutopilot(simulation, sceneCanvas) {
 
   // 2. Pop-out exportable window
   if (popoutBtn) {
-    setupPopout(panel, popoutBtn);
+    setupPopout(panel, popoutBtn, simulation);
   }
 
   // 3. Minimize / collapse
@@ -4872,7 +4896,12 @@ async function initAutopilot(simulation, sceneCanvas) {
     syncSettingsToSim();
   });
 
-  const previewCtx = previewCanvas.getContext("2d", { willReadFrequently: true });
+  // Dedicated offscreen sampling canvas for model inference and computer vision (160x120),
+  // leaving the visible autopilot preview canvas (320x240) clean for high-definition rendering.
+  const inferCanvas = document.createElement("canvas");
+  inferCanvas.width = 160;
+  inferCanvas.height = 120;
+  const inferCtx = inferCanvas.getContext("2d", { willReadFrequently: true });
   let model = null;
   let tf = window.tf || null;
   let isActive = false;
@@ -4950,6 +4979,12 @@ async function initAutopilot(simulation, sceneCanvas) {
   setDrivingMode("camera");
 
   function setPanelOpen(open) {
+    if (panel.classList.contains("is-popped-out")) {
+      if (!open && popoutBtn) {
+        popoutBtn.click();
+      }
+      return;
+    }
     panel.hidden = !open;
     toggleBtn?.setAttribute("aria-expanded", String(open));
   }
@@ -5061,7 +5096,8 @@ async function initAutopilot(simulation, sceneCanvas) {
 
     async function sampleAndInfer() {
       if (!model || isPredicting) return;
-      if (panel.hidden && !isActive) return;
+      const isPoppedOut = panel.classList.contains("is-popped-out");
+      if (panel.hidden && !isPoppedOut && !isActive) return;
 
       isPredicting = true;
       try {
@@ -5088,16 +5124,16 @@ async function initAutopilot(simulation, sceneCanvas) {
         const hasPhoneFeed = isCameraMode && simulation.phoneCameraReady && simulation.phoneCameraImage && (performance.now() - (simulation.lastPhoneCameraTime || 0) < 5000);
 
         if (hasPhoneFeed) {
-          previewCtx.drawImage(simulation.phoneCameraImage, 0, 0, 160, 120);
+          inferCtx.drawImage(simulation.phoneCameraImage, 0, 0, 160, 120);
         } else {
-          previewCtx.drawImage(sceneCanvas, sx, sy, sw, sh, 0, 0, 160, 120);
+          inferCtx.drawImage(sceneCanvas, sx, sy, sw, sh, 0, 0, 160, 120);
         }
 
         // Raw pixel buffer of the preview frame; shared by CV detection,
         // corridor estimating and the DAVE-2 tensor pipeline.
-        const imgData = previewCtx.getImageData(0, 0, 160, 120);
+        const imgData = inferCtx.getImageData(0, 0, 160, 120);
 
-        const modeTag = document.getElementById("autopilot-mode-tag");
+        const modeTag = panel.querySelector("#autopilot-mode-tag") || (typeof document !== "undefined" ? document.getElementById("autopilot-mode-tag") : null);
         if (modeTag) {
           if (hasPhoneFeed) {
             modeTag.textContent = "📱 تصویر دوربین زنده گوشی";
@@ -5118,7 +5154,7 @@ async function initAutopilot(simulation, sceneCanvas) {
         let visualObstacles = simulation.latestVisualObstacles || [];
         if (adasSource === "vision" && visualObstacles.length === 0) {
           const rawObstacles = detectVisualObstacles(
-            imgData,
+            sceneCanvas,
             simulation.state.x,
             simulation.state.heading,
             simulation.traffic?.laneCentres || LANE_CENTRES,
@@ -5367,8 +5403,12 @@ function boot() {
   const hudPerceptionItem = document.getElementById("hud-perception-item");
   if (hudPerceptionItem) {
     hudPerceptionItem.addEventListener("click", () => {
-      const panel = document.getElementById("test-panel");
+      const panel = simulation.testPanel || document.getElementById("test-panel");
       if (panel) {
+        if (panel.classList.contains("is-popped-out") && simulation.popoutWindow && !simulation.popoutWindow.closed) {
+          simulation.popoutWindow.focus();
+          return;
+        }
         panel.hidden = !panel.hidden;
         if (!panel.hidden) {
           panel.classList.remove("is-minimized");
