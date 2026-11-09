@@ -63,6 +63,8 @@ import {
   hazardFrame,
   headingDegrees,
   isLaneBlockedAtZ,
+  MIN_TRAFFIC_SEPARATION_M,
+  calculateTrafficSeparationSpeed,
   nextReconnectDelayMs,
   normalizeCommand,
   pickLane,
@@ -513,4 +515,38 @@ test("sceneViewport falls back to the window and never below 1x1", () => {
     sceneViewport({ clientWidth: 0, clientHeight: 0 }),
     { width: 1, height: 1 },
   );
+});
+
+/* -------------------- traffic separation & side-by-side -------------------- */
+
+test("MIN_TRAFFIC_SEPARATION_M guarantees at least 2 cars distance longitudinally", () => {
+  // A car length is 4.4m (CAR_HALF_Z * 2). 2 car lengths gap is 8.8m.
+  // Center-to-center distance must be at least 4.4 + 8.8 = 13.2m.
+  assert.ok(MIN_TRAFFIC_SEPARATION_M >= 14.0);
+  const clearGap = MIN_TRAFFIC_SEPARATION_M - 4.4;
+  assert.ok(clearGap >= 8.8, "bumper-to-bumper clearance must be at least 2 car lengths");
+});
+
+test("calculateTrafficSeparationSpeed prevents cars from pulling up side by side", () => {
+  const frontCar = { position: { x: 0, z: -50 }, userData: { active: true, speed: 6.0 } };
+  const rearCar = { position: { x: 3.4, z: -70 }, userData: { active: true, speed: 10.0 } }; // in adjacent lane
+  const allCars = [frontCar, rearCar];
+
+  // 1. Approaching within threshold (20m ahead): rear car speed is capped to front car speed
+  const speedApproaching = calculateTrafficSeparationSpeed(rearCar, allCars, 15.0);
+  assert.equal(speedApproaching, 6.0, "speed matched to front car so it cannot pull up side-by-side");
+
+  // 2. Too close (< 15m, e.g. 10m): rear car decelerates to open up the gap
+  rearCar.position.z = -60;
+  const speedTooClose = calculateTrafficSeparationSpeed(rearCar, allCars, 15.0);
+  assert.ok(speedTooClose < 6.0, "decelerates to widen gap back to at least 2 cars distance");
+
+  // 3. Far away (50m behind): rear car maintains its normal cruising speed
+  rearCar.position.z = -100;
+  const speedFar = calculateTrafficSeparationSpeed(rearCar, allCars, 15.0);
+  assert.equal(speedFar, 10.0, "normal speed when far away");
+
+  // 4. Front car is ahead of rear car, so front car's speed is unaffected by rear car
+  const frontSpeed = calculateTrafficSeparationSpeed(frontCar, allCars, 15.0);
+  assert.equal(frontSpeed, 6.0, "front car speed unaffected by car behind");
 });
