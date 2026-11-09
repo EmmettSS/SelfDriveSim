@@ -578,3 +578,37 @@ test("manual crop pointer dragging adjusts crop boundary handles and updates cap
   assert.equal(draws[1], Math.round(h.controller.tracker.rect.x0 * 1280));
 });
 
+test("scanMobileObstacles detects vehicles on-device and calculates distance and lane", async () => {
+  const h = await connected();
+  h.controller.running = true;
+  h.controller.cocoDetector = {
+    detect: async () => [
+      { class: "car", score: 0.85, bbox: [120, 140, 80, 60] }
+    ],
+  };
+
+  await h.controller.scanMobileObstacles();
+  assert.equal(h.controller.latestMobileObstacles.length, 1);
+  const obs = h.controller.latestMobileObstacles[0];
+  assert.equal(obs.class, "car");
+  assert.equal(obs.source, "mobile_ai");
+  assert.ok(obs.distanceM > 0 && obs.distanceM < 95);
+});
+
+test("dispatchCommand updates HUD alert when on-device obstacle is detected and preserves model steering for corridor planner", async () => {
+  const h = await connected();
+  h.controller.running = true;
+  h.controller.latestMobileObstacles = [
+    { distanceM: 25, laneIdx: 1, class: "car", score: 0.9, laneName: "وسط" }
+  ];
+
+  const neutralCmd = { steering: 0, throttle: 0.5, brake: 0, turn_signal: 0 };
+  assert.equal(h.controller.dispatchCommand(neutralCmd, Date.now()), true);
+
+  const sent = h.sockets[0].sent.at(-1);
+  assert.equal(sent.steering, 0, "preserves steering for simulator ADAS corridor planner");
+  assert.equal(sent.throttle, 0.5);
+  assert.equal(sent.brake, 0);
+  assert.match(h.ui["status-message"].textContent, /25/, "status updated with obstacle distance");
+});
+
